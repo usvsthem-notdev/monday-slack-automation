@@ -26,6 +26,7 @@ const MESSAGE_STORE_FILE = './data/message-store.json';
 // Metrics
 const metrics = {
   usersProcessed: 0,
+  usersSkipped: 0,
   tasksFound: 0,
   messagesUpdated: 0,
   messagesSent: 0,
@@ -38,6 +39,14 @@ const logger = {
   info: (msg, data = {}) => {
     console.log(JSON.stringify({ 
       level: 'info', 
+      message: msg, 
+      data, 
+      timestamp: new Date().toISOString() 
+    }));
+  },
+  warn: (msg, data = {}) => {
+    console.log(JSON.stringify({ 
+      level: 'warn', 
       message: msg, 
       data, 
       timestamp: new Date().toISOString() 
@@ -557,6 +566,30 @@ async function sendOrUpdateSlackMessage(user, slackMessage) {
     }
     
   } catch (error) {
+    // Check if error is due to user not found in Slack
+    if (error.data?.error === 'users_not_found') {
+      logger.warn(`Slack user not found for ${user.name} (${user.email}) - Skipping`, {
+        userId: user.id,
+        email: user.email
+      });
+      metrics.usersSkipped++;
+      return; // Continue to next user without throwing
+    }
+    
+    // Check for other common Slack errors that shouldn't stop automation
+    if (error.data?.error === 'account_inactive' || 
+        error.data?.error === 'invalid_email' ||
+        error.data?.error === 'user_disabled') {
+      logger.warn(`Slack account issue for ${user.name} (${user.email}): ${error.data.error} - Skipping`, {
+        userId: user.id,
+        email: user.email,
+        slackError: error.data.error
+      });
+      metrics.usersSkipped++;
+      return; // Continue to next user without throwing
+    }
+    
+    // For other errors, log and rethrow
     logger.error(`Failed to send Slack message to ${user.name}`, error);
     throw error;
   }
@@ -605,7 +638,7 @@ async function runAutomation() {
         // Format Slack message
         const slackMessage = formatSlackMessage(organizedTasks, user.name);
         
-        // Send or update message
+        // Send or update message (will gracefully skip if user not found in Slack)
         await sendOrUpdateSlackMessage(user, slackMessage);
         
         metrics.usersProcessed++;
@@ -614,6 +647,7 @@ async function runAutomation() {
       } catch (userError) {
         metrics.errors++;
         logger.error(`Failed to process user ${user.name}`, userError);
+        // Continue to next user even if this one fails
       }
     }
     
