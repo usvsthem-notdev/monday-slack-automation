@@ -2,11 +2,6 @@ name: Monday.com to Slack Task Sync
 on:
   schedule:
     - cron: '0 12 * * *'
-    - cron: '0 14 * * *'
-    - cron: '0 16 * * *'
-    - cron: '0 18 * * *'
-    - cron: '0 20 * * *'
-    - cron: '0 22 * * *'
   workflow_dispatch:
     inputs:
       test_user_only:
