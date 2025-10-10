@@ -2,9 +2,6 @@ require('dotenv').config();
 const { WebClient } = require('@slack/web-api');
 const { App } = require('@slack/bolt');
 const axios = require('axios');
-const fs = require('fs').promises;
-const path = require('path');
-const express = require('express');
 const { initializeSlackCommands } = require('./slackCommands');
 
 // Configuration
@@ -22,7 +19,7 @@ const slack = new WebClient(SLACK_BOT_TOKEN);
 const slackApp = new App({
   token: SLACK_BOT_TOKEN,
   signingSecret: SLACK_SIGNING_SECRET,
-  socketMode: false, // Using HTTP mode for Render
+  socketMode: false,
   port: PORT
 });
 
@@ -34,9 +31,8 @@ const mondayAxios = axios.create({
   }
 });
 
-// Message store
+// Message store - In-memory cache
 const messageStore = new Map();
-const MESSAGE_STORE_FILE = './data/message-store.json';
 
 // Metrics
 const metrics = {
@@ -86,6 +82,49 @@ const logger = {
     }));
   }
 };
+
+// ============================================
+// PERSISTENT STORAGE - Using environment variables
+// ============================================
+
+// Load message store from environment variable
+async function loadMessageStore() {
+  try {
+    const stored = process.env.MESSAGE_STORE;
+    if (stored) {
+      const data = JSON.parse(stored);
+      Object.entries(data).forEach(([key, value]) => {
+        messageStore.set(key, value);
+      });
+      logger.info('Loaded message store from environment', { count: messageStore.size });
+    } else {
+      logger.info('No existing message store found, starting fresh');
+    }
+  } catch (error) {
+    logger.warn('Failed to load message store from environment', error);
+    logger.info('Starting with empty message store');
+  }
+}
+
+// Note: We can't save to environment variables at runtime
+// This is logged for manual update or for future database integration
+async function saveMessageStore() {
+  try {
+    const stored = Object.fromEntries(messageStore);
+    const jsonStr = JSON.stringify(stored);
+    
+    logger.info('Message store state (copy to MESSAGE_STORE env var for persistence):', { 
+      count: messageStore.size,
+      store: stored 
+    });
+    
+    // For now, we accept that this will be ephemeral
+    // Future: Use Render PostgreSQL or external service
+    
+  } catch (error) {
+    logger.error('Failed to serialize message store', error);
+  }
+}
 
 // Monday.com GraphQL queries
 const QUERIES = {
@@ -138,33 +177,6 @@ const QUERIES = {
     }
   `
 };
-
-// Load message store
-async function loadMessageStore() {
-  try {
-    await fs.mkdir('./data', { recursive: true });
-    const data = await fs.readFile(MESSAGE_STORE_FILE, 'utf8');
-    const stored = JSON.parse(data);
-    Object.entries(stored).forEach(([key, value]) => {
-      messageStore.set(key, value);
-    });
-    logger.info('Loaded message store', { count: messageStore.size });
-  } catch (error) {
-    logger.info('No existing message store found, starting fresh');
-  }
-}
-
-// Save message store
-async function saveMessageStore() {
-  try {
-    await fs.mkdir('./data', { recursive: true });
-    const stored = Object.fromEntries(messageStore);
-    await fs.writeFile(MESSAGE_STORE_FILE, JSON.stringify(stored, null, 2));
-    logger.info('Saved message store', { count: messageStore.size });
-  } catch (error) {
-    logger.error('Failed to save message store', error);
-  }
-}
 
 // Monday.com API helper
 async function mondayQuery(query) {
@@ -485,7 +497,7 @@ async function sendOrUpdateSlackMessage(user, slackMessage) {
         userId: user.id,
         email: user.email
       });
-      metrics.usersSkipped++;
+      metrics.usersSkipped++; 
       return;
     }
     
@@ -586,6 +598,7 @@ async function startServer() {
     logger.info(`🌐 Listening on 0.0.0.0:${PORT}`);
     logger.success('✅ Slack commands ready: /create-task, /quick-task, /monday-help');
     logger.info('✅ Service ready');
+    logger.warn('⚠️  Message store is ephemeral - will reset on deployments');
     
   } catch (error) {
     logger.error('❌ Failed to start service', error);
