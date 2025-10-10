@@ -1,18 +1,31 @@
 require('dotenv').config();
 const { WebClient } = require('@slack/web-api');
+const { App } = require('@slack/bolt');
 const axios = require('axios');
 const fs = require('fs').promises;
 const path = require('path');
 const express = require('express');
+const { initializeSlackCommands } = require('./slackCommands');
 
 // Configuration
 const MONDAY_API_KEY = process.env.MONDAY_API_KEY;
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
+const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
+const SLACK_APP_TOKEN = process.env.SLACK_APP_TOKEN;
 const TEST_MODE = process.env.TEST_MODE === 'true';
 const PORT = process.env.PORT || 10000;
 
-// Initialize clients
+// Initialize Slack clients
 const slack = new WebClient(SLACK_BOT_TOKEN);
+
+// Initialize Slack Bolt App for slash commands
+const slackApp = new App({
+  token: SLACK_BOT_TOKEN,
+  signingSecret: SLACK_SIGNING_SECRET,
+  socketMode: false, // Using HTTP mode for Render
+  port: PORT
+});
+
 const mondayAxios = axios.create({
   baseURL: 'https://api.monday.com/v2',
   headers: {
@@ -335,7 +348,7 @@ function formatSlackMessage(tasks, userName) {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*${task.name}*\n📅 ${dueDate} | 📍 ${task.boardName}`
+          text: `*${task.name}*\\n📅 ${dueDate} | 📍 ${task.boardName}`
         }
       });
     });
@@ -356,7 +369,7 @@ function formatSlackMessage(tasks, userName) {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*${task.name}*\n📍 ${task.boardName}`
+          text: `*${task.name}*\\n📍 ${task.boardName}`
         }
       });
     });
@@ -378,7 +391,7 @@ function formatSlackMessage(tasks, userName) {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*${task.name}*\n📅 ${dueDate} | 📍 ${task.boardName}`
+          text: `*${task.name}*\\n📅 ${dueDate} | 📍 ${task.boardName}`
         }
       });
     });
@@ -553,89 +566,30 @@ async function runAutomation() {
 }
 
 // ============================================
-// EXPRESS WEB SERVER FOR RENDER
+// START SERVER WITH SLACK COMMANDS
 // ============================================
 
-const app = express();
-app.use(express.json());
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    lastRun: metrics.lastRun,
-    metrics: {
-      usersProcessed: metrics.usersProcessed,
-      messagesUpdated: metrics.messagesUpdated,
-      messagesSent: metrics.messagesSent,
-      errors: metrics.errors
-    }
-  });
-});
-
-// Root endpoint
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Monday.com → Slack Automation Service',
-    status: 'running',
-    version: '2.0',
-    endpoints: {
-      health: '/health',
-      trigger: '/trigger (POST)',
-      metrics: '/metrics'
-    },
-    lastRun: metrics.lastRun
-  });
-});
-
-// Metrics endpoint
-app.get('/metrics', (req, res) => {
-  res.json({
-    ...metrics,
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Manual trigger endpoint
-app.post('/trigger', async (req, res) => {
-  logger.info('Manual automation trigger received');
-  
-  // Send immediate response
-  res.json({ 
-    status: 'triggered', 
-    message: 'Automation started',
-    timestamp: new Date().toISOString()
-  });
-  
-  // Run automation in background
-  runAutomation().catch(error => {
-    logger.error('Manual trigger failed', error);
-  });
-});
-
-// Start server
 async function startServer() {
   try {
+    // Initialize Slack commands
+    logger.info('Initializing Slack commands...');
+    initializeSlackCommands(slackApp);
+    
     // Run automation once on startup
     logger.info('Running initial automation on startup...');
     await runAutomation();
     
-    // Start HTTP server
-    app.listen(PORT, '0.0.0.0', () => {
-      logger.success(`⚡️ Server running on port ${PORT}`);
-      logger.info(`🌐 Listening on 0.0.0.0:${PORT}`);
-      logger.info('✅ Service ready');
-    });
+    // Start Slack Bolt receiver (handles slash commands)
+    await slackApp.start(PORT);
+    
+    logger.success(`⚡️ Server running on port ${PORT}`);
+    logger.info(`🌐 Listening on 0.0.0.0:${PORT}`);
+    logger.success('✅ Slack commands ready: /create-task, /quick-task, /monday-help');
+    logger.info('✅ Service ready');
+    
   } catch (error) {
     logger.error('❌ Failed to start service', error);
-    
-    // Still start the server even if automation fails
-    app.listen(PORT, '0.0.0.0', () => {
-      logger.info(`⚡️ Server running on port ${PORT} (automation failed but server is up)`);
-    });
+    process.exit(1);
   }
 }
 
