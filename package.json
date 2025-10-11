@@ -1,12 +1,12 @@
 {
   "name": "monday-slack-automation",
-  "version": "3.0.0",
-  "description": "Automated Monday.com task sync to Slack with scheduled triggers",
+  "version": "4.0.0",
+  "description": "Optimized Monday.com task sync to Slack with caching, monitoring, and error handling",
   "main": "src/automation.js",
   "scripts": {
     "start": "node src/automation.js",
     "dev": "NODE_ENV=development node src/automation.js",
-    "test": "echo \"Tests not yet implemented\" && exit 0"
+    "test": "node tests/automation.test.js"
   },
   "dependencies": {
     "@slack/web-api": "^7.0.4",
@@ -23,7 +23,10 @@
     "slack",
     "automation",
     "scheduled-tasks",
-    "webhook"
+    "webhook",
+    "caching",
+    "monitoring",
+    "performance"
   ],
   "author": "Connor Drexler",
   "license": "MIT",
