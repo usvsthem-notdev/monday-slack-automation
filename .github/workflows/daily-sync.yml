@@ -1,0 +1,42 @@
+name: Daily Monday.com Task Sync
+
+on:
+  schedule:
+    # Run at 9:00 AM EST (14:00 UTC) on weekdays
+    - cron: '0 14 * * 1-5'
+  
+  # Allow manual triggering for testing
+  workflow_dispatch:
+
+jobs:
+  trigger-automation:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Trigger Monday.com → Slack Automation
+        run: |
+          echo "🚀 Triggering daily task sync..."
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            https://monday-slack-automation.onrender.com/trigger)
+          
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | head -n-1)
+          
+          echo "Response: $body"
+          echo "HTTP Status: $http_code"
+          
+          if [ "$http_code" -eq 200 ]; then
+            echo "✅ Automation triggered successfully!"
+          else
+            echo "❌ Failed to trigger automation (HTTP $http_code)"
+            exit 1
+          fi
+      
+      - name: Summary
+        run: |
+          echo "### 📋 Daily Task Sync" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Successfully triggered Monday.com task sync" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** https://monday-slack-automation.onrender.com" >> $GITHUB_STEP_SUMMARY
