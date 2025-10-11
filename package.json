@@ -1,24 +1,34 @@
 {
   "name": "monday-slack-automation",
-  "version": "1.0.0",
-  "description": "Automated Monday.com task sync to Slack",
+  "version": "3.0.0",
+  "description": "Automated Monday.com task sync to Slack with scheduled triggers",
   "main": "src/automation.js",
   "scripts": {
     "start": "node src/automation.js",
-    "server": "node src/server.js"
+    "dev": "NODE_ENV=development node src/automation.js",
+    "test": "echo \"Tests not yet implemented\" && exit 0"
   },
   "dependencies": {
     "@slack/web-api": "^7.0.4",
     "@slack/bolt": "^3.17.1",
-    "express": "^4.18.2",
-    "body-parser": "^1.20.2",
     "axios": "^1.7.2",
     "dotenv": "^16.4.5"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
   },
-  "keywords": ["monday.com", "slack", "automation"],
+  "keywords": [
+    "monday.com",
+    "slack",
+    "automation",
+    "scheduled-tasks",
+    "webhook"
+  ],
   "author": "Connor Drexler",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/usvsthem-notdev/monday-slack-automation.git"
+  }
 }
