@@ -1,7 +1,6 @@
 # Dependencies
 node_modules/
 package-lock.json
-yarn.lock
 
 # Environment variables
 .env
@@ -15,30 +14,32 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-data/
-
-# Testing
-coverage/
-.nyc_output/
+# OS files
+.DS_Store
+Thumbs.db
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
-.DS_Store
+*.sublime-*
 
 # Build outputs
 dist/
 build/
-*.tsbuildinfo
+
+# Backup files
+*.backup.*
+
+# Testing
+coverage/
+.nyc_output/
 
 # Temporary files
 tmp/
 temp/
+
+# Debug
+.pnp.*
+.yarn/
