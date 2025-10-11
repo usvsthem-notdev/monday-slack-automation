@@ -31,7 +31,7 @@ const mondayAxios = axios.create({
   }
 });
 
-// Message store - In-memory cache
+// Message store - In-memory cache (resets on restart)
 const messageStore = new Map();
 
 // Metrics
@@ -82,49 +82,6 @@ const logger = {
     }));
   }
 };
-
-// ============================================
-// PERSISTENT STORAGE - Using environment variables
-// ============================================
-
-// Load message store from environment variable
-async function loadMessageStore() {
-  try {
-    const stored = process.env.MESSAGE_STORE;
-    if (stored) {
-      const data = JSON.parse(stored);
-      Object.entries(data).forEach(([key, value]) => {
-        messageStore.set(key, value);
-      });
-      logger.info('Loaded message store from environment', { count: messageStore.size });
-    } else {
-      logger.info('No existing message store found, starting fresh');
-    }
-  } catch (error) {
-    logger.warn('Failed to load message store from environment', error);
-    logger.info('Starting with empty message store');
-  }
-}
-
-// Note: We can't save to environment variables at runtime
-// This is logged for manual update or for future database integration
-async function saveMessageStore() {
-  try {
-    const stored = Object.fromEntries(messageStore);
-    const jsonStr = JSON.stringify(stored);
-    
-    logger.info('Message store state (copy to MESSAGE_STORE env var for persistence):', { 
-      count: messageStore.size,
-      store: stored 
-    });
-    
-    // For now, we accept that this will be ephemeral
-    // Future: Use Render PostgreSQL or external service
-    
-  } catch (error) {
-    logger.error('Failed to serialize message store', error);
-  }
-}
 
 // Monday.com GraphQL queries
 const QUERIES = {
@@ -521,8 +478,6 @@ async function runAutomation() {
   metrics.startTime = new Date();
   
   try {
-    await loadMessageStore();
-    
     logger.info('Fetching users...');
     const users = await getActiveUsers();
     logger.info(`Found ${users.length} active users`);
@@ -559,8 +514,6 @@ async function runAutomation() {
       }
     }
     
-    await saveMessageStore();
-    
     const duration = (new Date() - metrics.startTime) / 1000;
     metrics.lastRun = new Date().toISOString();
     logger.success('✅ Automation completed', {
@@ -578,7 +531,7 @@ async function runAutomation() {
 }
 
 // ============================================
-// START SERVER WITH SLACK COMMANDS
+// START SERVER - NO AUTOMATION ON STARTUP
 // ============================================
 
 async function startServer() {
@@ -587,9 +540,9 @@ async function startServer() {
     logger.info('Initializing Slack commands...');
     initializeSlackCommands(slackApp);
     
-    // Run automation once on startup
-    logger.info('Running initial automation on startup...');
-    await runAutomation();
+    // DO NOT run automation on startup - wait for scheduled trigger
+    logger.info('⏰ Automation will run on scheduled trigger (9 AM EST weekdays)');
+    logger.info('💡 Manual trigger available at POST /trigger');
     
     // Start Slack Bolt receiver (handles slash commands)
     await slackApp.start(PORT);
@@ -597,14 +550,77 @@ async function startServer() {
     logger.success(`⚡️ Server running on port ${PORT}`);
     logger.info(`🌐 Listening on 0.0.0.0:${PORT}`);
     logger.success('✅ Slack commands ready: /create-task, /quick-task, /monday-help');
+    logger.info('📅 Scheduled automation: 9 AM EST weekdays (GitHub Actions)');
     logger.info('✅ Service ready');
-    logger.warn('⚠️  Message store is ephemeral - will reset on deployments');
     
   } catch (error) {
     logger.error('❌ Failed to start service', error);
     process.exit(1);
   }
 }
+
+// ============================================
+// HTTP ENDPOINTS
+// ============================================
+
+// Manual trigger endpoint
+slackApp.receiver.app.post('/trigger', async (req, res) => {
+  logger.info('Manual automation trigger received');
+  
+  // Send immediate response
+  res.json({ 
+    status: 'triggered', 
+    message: 'Automation started',
+    timestamp: new Date().toISOString()
+  });
+  
+  // Run automation in background
+  runAutomation().catch(error => {
+    logger.error('Manual trigger failed', error);
+  });
+});
+
+// Health check endpoint
+slackApp.receiver.app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    lastRun: metrics.lastRun,
+    metrics: {
+      usersProcessed: metrics.usersProcessed,
+      messagesUpdated: metrics.messagesUpdated,
+      messagesSent: metrics.messagesSent,
+      errors: metrics.errors
+    }
+  });
+});
+
+// Root endpoint
+slackApp.receiver.app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Monday.com → Slack Automation Service',
+    status: 'running',
+    version: '3.0',
+    mode: 'scheduled',
+    schedule: '9:00 AM EST weekdays',
+    endpoints: {
+      health: '/health',
+      trigger: '/trigger (POST)',
+      slack: '/slack/events (Slack commands)'
+    },
+    lastRun: metrics.lastRun
+  });
+});
+
+// Metrics endpoint
+slackApp.receiver.app.get('/metrics', (req, res) => {
+  res.json({
+    ...metrics,
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
 
 // Start the service
 startServer();
