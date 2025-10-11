@@ -1,17 +1,49 @@
+# Render Service Configuration
+# This file documents the optimal Render configuration for this service
+
 services:
   - type: web
     name: monday-slack-automation
     env: node
-    plan: free
-    buildCommand: npm install
-    startCommand: node src/server.js
+    plan: free  # or upgrade to starter for better performance
+    region: oregon
+    branch: main
+    buildCommand: yarn install --frozen-lockfile
+    startCommand: node src/automation.js
+    
+    # Health check configuration
     healthCheckPath: /health
+    
+    # Auto-deploy on push to main
+    autoDeploy: true
+    
+    # Environment variables (set in Render Dashboard)
     envVars:
       - key: NODE_ENV
         value: production
       - key: MONDAY_API_KEY
-        sync: false
+        sync: false  # Set in dashboard - secret
       - key: SLACK_BOT_TOKEN
-        sync: false
+        sync: false  # Set in dashboard - secret
       - key: SLACK_SIGNING_SECRET
-        sync: false
+        sync: false  # Set in dashboard - secret
+      - key: PORT
+        value: 1000
+
+# Performance Recommendations:
+# 1. Enable build caching (set via dashboard)
+# 2. Use yarn over npm for faster installs
+# 3. Set NODE_ENV=production for optimized builds
+# 4. Monitor service with /health and /metrics endpoints
+
+# Free Tier Considerations:
+# - Service spins down after 15 minutes of inactivity
+# - First request after spin-down takes 30-60 seconds
+# - GitHub Actions workflow includes wake-up step
+# - Consider upgrading to Starter plan for always-on service
+
+# Upgrade Benefits (Starter Plan $7/month):
+# - Service stays running 24/7
+# - Faster cold starts
+# - More resources (512MB RAM vs 512MB)
+# - Better for reliability
