@@ -1,42 +1,30 @@
-name: Monday.com to Slack Task Sync
+# This workflow has been replaced by daily-sync.yml
+# Keeping this file for reference only - it will not run
+
+name: "[DISABLED] Old Monday.com Sync - DO NOT USE"
+
+# Workflow is disabled by removing all triggers
 on:
-  schedule:
-    - cron: '0 12 * * *'
+  # No triggers defined - this workflow will never run automatically
   workflow_dispatch:
     inputs:
-      test_user_only:
-        description: 'Test with single user (Connor)'
+      note:
+        description: 'This workflow is disabled. Use "Daily Monday.com Task Sync" instead.'
         required: false
-        type: boolean
-        default: false
+
 jobs:
-  sync-tasks:
+  disabled:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      
-      - name: Install dependencies
-        run: npm install
-      
-      - name: Run automation
-        env:
-          MONDAY_API_KEY: ${{ secrets.MONDAY_API_KEY }}
-          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          TEST_MODE: ${{ github.event.inputs.test_user_only || 'false' }}
-        run: node src/automation.js
-      
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: automation-logs-${{ github.run_number }}
-          path: logs/
-          retention-days: 7
+      - name: Workflow Disabled
+        run: |
+          echo "❌ This workflow has been disabled and replaced."
+          echo ""
+          echo "✅ Please use: 'Daily Monday.com Task Sync' workflow instead"
+          echo ""
+          echo "The new workflow:"
+          echo "  - Triggers the Render service via /trigger endpoint"
+          echo "  - Runs at 9 AM EST weekdays"
+          echo "  - Does not require secrets in GitHub Actions"
+          echo "  - More reliable and simpler"
+          exit 1
