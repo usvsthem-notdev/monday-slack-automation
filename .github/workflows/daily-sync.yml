@@ -1,4 +1,4 @@
-name: Daily Monday.com Task Sync
+name: Daily Monday.com Task Sync (Optimized)
 
 on:
   schedule:
@@ -7,36 +7,101 @@ on:
   
   # Allow manual triggering for testing
   workflow_dispatch:
+    inputs:
+      force_wake:
+        description: 'Force wake service first (free tier)'
+        type: boolean
+        default: true
 
 jobs:
   trigger-automation:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     
     steps:
+      - name: Wake Service (Free Tier)
+        if: github.event.inputs.force_wake != 'false'
+        run: |
+          echo "🔄 Waking up Render service..."
+          # Ping health endpoint to wake service
+          for i in {1..3}; do
+            echo "Attempt $i/3..."
+            if curl -f -s --max-time 30 https://monday-slack-automation.onrender.com/health > /dev/null 2>&1; then
+              echo "✅ Service is awake!"
+              break
+            fi
+            echo "⏳ Waiting 15 seconds..."
+            sleep 15
+          done
+      
+      - name: Wait for Service Ready
+        run: sleep 5
+      
       - name: Trigger Monday.com → Slack Automation
+        id: trigger
         run: |
           echo "🚀 Triggering daily task sync..."
-          response=$(curl -s -w "\n%{http_code}" -X POST \
-            https://monday-slack-automation.onrender.com/trigger)
           
-          http_code=$(echo "$response" | tail -n1)
-          body=$(echo "$response" | head -n-1)
+          # Make request with retry logic
+          max_attempts=3
+          attempt=1
           
-          echo "Response: $body"
-          echo "HTTP Status: $http_code"
-          
-          if [ "$http_code" -eq 200 ]; then
-            echo "✅ Automation triggered successfully!"
-          else
-            echo "❌ Failed to trigger automation (HTTP $http_code)"
-            exit 1
-          fi
+          while [ $attempt -le $max_attempts ]; do
+            echo "Attempt $attempt/$max_attempts..."
+            
+            response=$(curl -s -w "\n%{http_code}" --max-time 120 -X POST \
+              https://monday-slack-automation.onrender.com/trigger)
+            
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | head -n-1)
+            
+            echo "Response: $body"
+            echo "HTTP Status: $http_code"
+            
+            if [ "$http_code" -eq 200 ]; then
+              echo "✅ Automation triggered successfully!"
+              echo "success=true" >> $GITHUB_OUTPUT
+              exit 0
+            elif [ "$http_code" -eq 503 ] && [ $attempt -lt $max_attempts ]; then
+              echo "⚠️  Service unavailable, retrying in 10 seconds..."
+              sleep 10
+              attempt=$((attempt + 1))
+            else
+              echo "❌ Failed to trigger automation (HTTP $http_code)"
+              echo "success=false" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+          done
       
-      - name: Summary
+      - name: Verify Automation Started
+        if: steps.trigger.outputs.success == 'true'
         run: |
-          echo "### 📋 Daily Task Sync" >> $GITHUB_STEP_SUMMARY
+          echo "⏳ Waiting 5 seconds for automation to start..."
+          sleep 5
+          
+          echo "📊 Checking metrics..."
+          metrics=$(curl -s https://monday-slack-automation.onrender.com/metrics)
+          echo "$metrics" | jq '.' 2>/dev/null || echo "$metrics"
+      
+      - name: Create Summary
+        if: always()
+        run: |
+          echo "### 📋 Daily Task Sync Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Successfully triggered Monday.com task sync" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.trigger.outputs.success }}" == "true" ]; then
+            echo "✅ **Status:** Success" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Status:** Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** https://monday-slack-automation.onrender.com" >> $GITHUB_STEP_SUMMARY
+          echo "**Logs:** https://dashboard.render.com" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "::error::Automation failed to trigger. Check Render logs for details."
+          echo "::error::Dashboard: https://dashboard.render.com/web/srv-d3k1gv6uk2gs739ht9d0"
