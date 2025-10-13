@@ -1,6 +1,6 @@
 require('dotenv').config();
 const { WebClient } = require('@slack/web-api');
-const { App } = require('@slack/bolt');
+const { App, ExpressReceiver } = require('@slack/bolt');
 const axios = require('axios');
 const { initializeSlackCommands } = require('./slackCommands');
 
@@ -15,12 +15,15 @@ const PORT = process.env.PORT || 10000;
 // Initialize Slack clients
 const slack = new WebClient(SLACK_BOT_TOKEN);
 
-// Initialize Slack Bolt App for slash commands
+// Create ExpressReceiver to have direct access to Express app
+const receiver = new ExpressReceiver({
+  signingSecret: SLACK_SIGNING_SECRET
+});
+
+// Initialize Slack Bolt App with custom receiver
 const slackApp = new App({
   token: SLACK_BOT_TOKEN,
-  signingSecret: SLACK_SIGNING_SECRET,
-  socketMode: false,
-  port: PORT
+  receiver: receiver
 });
 
 const mondayAxios = axios.create({
@@ -563,8 +566,8 @@ async function startServer() {
 // HTTP ENDPOINTS
 // ============================================
 
-// Manual trigger endpoint
-slackApp.receiver.app.post('/trigger', async (req, res) => {
+// Manual trigger endpoint - Using receiver.app directly
+receiver.app.post('/trigger', async (req, res) => {
   logger.info('Manual automation trigger received');
   
   // Send immediate response
@@ -581,7 +584,7 @@ slackApp.receiver.app.post('/trigger', async (req, res) => {
 });
 
 // Health check endpoint
-slackApp.receiver.app.get('/health', (req, res) => {
+receiver.app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
     timestamp: new Date().toISOString(),
@@ -597,7 +600,7 @@ slackApp.receiver.app.get('/health', (req, res) => {
 });
 
 // Root endpoint
-slackApp.receiver.app.get('/', (req, res) => {
+receiver.app.get('/', (req, res) => {
   res.json({ 
     message: 'Monday.com → Slack Automation Service',
     status: 'running',
@@ -614,7 +617,7 @@ slackApp.receiver.app.get('/', (req, res) => {
 });
 
 // Metrics endpoint
-slackApp.receiver.app.get('/metrics', (req, res) => {
+receiver.app.get('/metrics', (req, res) => {
   res.json({
     ...metrics,
     uptime: process.uptime(),
