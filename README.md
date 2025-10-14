@@ -1,324 +1,374 @@
-# 📋 Monday.com → Slack Task Automation
+# Monday.com → Slack Automation
 
-**v3.0** - Automated task syncing from Monday.com to Slack with interactive buttons and slash commands.
+⚡️ **Automated task synchronization between Monday.com and Slack with real-time notifications**
 
-## ✨ Features
+## 🌟 Features
 
-- 🔄 **Automated Daily Sync** - Tasks synced to Slack DMs every day at 8 AM ET
-- 🎯 **Interactive Buttons** - Complete, Update, Postpone, or View tasks directly from Slack
-- ⚡ **Slash Command** - `/tasks` to fetch your latest tasks on-demand
-- 📊 **Smart Organization** - Tasks categorized as Overdue, Due Today, or Upcoming
-- 🔔 **Message Updates** - Updates existing messages instead of spamming new ones
-- 🚀 **Render-Ready** - Web service that stays alive with health checks
+### 📨 Scheduled Daily Digest
+- **Automated daily task summaries** sent to Slack at 9 AM EST (weekdays)
+- Tasks organized by priority: Overdue, Due Today, Upcoming This Week
+- Beautiful formatted messages with task details and quick actions
+- Updates existing messages instead of creating new ones
 
-## 🎯 How It Works
+### 🔔 **NEW: Real-Time Task Assignment Notifications**
+- **Instant Slack notifications** when users are assigned to tasks
+- Smart detection of newly assigned users (won't spam existing assignees)
+- Rich notifications with task details, due dates, and status
+- Interactive action buttons: Mark Complete, Update Task, Open in Monday
+- See [Feature Documentation](docs/FEATURE_TASK_NOTIFICATIONS.md) for details
 
-1. **Automated Sync**: Runs daily at 8 AM ET (configurable in GitHub Actions)
-2. **On-Demand**: Users can type `/tasks` in Slack anytime
-3. **Interactive**: Click buttons on tasks to take action
-4. **Smart Updates**: Updates the same message throughout the day
+### 🤖 Slack Commands
+- `/tasks` - View your current tasks
+- `/create-task` - Create a new task in Monday.com
+- `/quick-task` - Quickly add a task with minimal details
+- `/task-complete [name]` - Mark a task as complete
+- `/monday-help` - Get help with available commands
+
+### ✨ Interactive Features
+- **One-click task actions** directly from Slack messages
+- Mark tasks complete without leaving Slack
+- Postpone due dates with a single click
+- Update task status, dates, and add notes via modals
+- View detailed task information inline
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- Node.js 18+
-- Monday.com API key
-- Slack Bot with permissions
-- Render account (or any hosting platform)
+- Node.js 20+ and npm 10+
+- Monday.com account with API access
+- Slack workspace with bot permissions
+- Render account (for deployment)
 
-### 1. Clone Repository
+### Installation
 
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/usvsthem-notdev/monday-slack-automation.git
+   cd monday-slack-automation
+   ```
+
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
+
+3. **Configure environment variables**
+   ```bash
+   cp .env.example .env
+   ```
+   
+   Edit `.env` with your credentials:
+   ```bash
+   MONDAY_API_KEY=your_monday_api_key
+   SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
+   SLACK_SIGNING_SECRET=your_slack_signing_secret
+   PORT=3000
+   ```
+
+4. **Run locally**
+   ```bash
+   npm start
+   ```
+
+## 🔧 Setup Guide
+
+### 1. Monday.com Setup
+
+1. Go to [Monday.com Developers](https://monday.com/developers)
+2. Create a new app or use existing
+3. Generate an API token with these scopes:
+   - `boards:read`
+   - `boards:write`
+   - `users:read`
+4. Copy the API token to your `.env` file
+
+### 2. Slack Setup
+
+1. Go to [Slack API](https://api.slack.com/apps)
+2. Create a new app or select existing
+3. Add the following Bot Token Scopes:
+   - `chat:write`
+   - `im:write`
+   - `users:read`
+   - `users:read.email`
+   - `commands`
+4. Install the app to your workspace
+5. Copy the Bot Token and Signing Secret to `.env`
+
+### 3. Webhook Setup (For Real-Time Notifications)
+
+**Important**: Set up webhooks after deploying your server to Render (so it's publicly accessible).
+
+Follow the comprehensive [Webhook Setup Guide](docs/WEBHOOK_SETUP.md) to:
+- Configure Monday.com webhooks
+- Point them to your server's webhook endpoint
+- Test the integration
+- Monitor webhook events
+
+**Quick Setup**:
+1. Deploy to Render (see deployment section below)
+2. Get your webhook URL: `https://your-app.onrender.com/webhook/monday`
+3. In Monday.com, create a webhook:
+   - Event: `change_column_value`
+   - URL: Your webhook endpoint
+   - Boards: Select boards to monitor
+
+### 4. Deployment to Render
+
+1. **Connect Repository**
+   - Go to [Render Dashboard](https://dashboard.render.com)
+   - Click "New +" → "Web Service"
+   - Connect your GitHub repository
+
+2. **Configure Service**
+   - Name: `monday-slack-automation`
+   - Environment: `Node`
+   - Build Command: `npm install`
+   - Start Command: `npm start`
+   - Instance Type: Choose based on your needs
+
+3. **Set Environment Variables**
+   Add all variables from your `.env` file:
+   - `MONDAY_API_KEY`
+   - `SLACK_BOT_TOKEN`
+   - `SLACK_SIGNING_SECRET`
+   - `PORT` (Render will auto-assign, but you can set 10000)
+
+4. **Deploy**
+   - Click "Create Web Service"
+   - Wait for deployment to complete
+   - Note your service URL (e.g., `https://monday-slack-automation-xyz.onrender.com`)
+
+5. **Configure Webhooks** (After Deployment)
+   - Use your Render URL to set up Monday.com webhooks
+   - Test the webhook endpoint
+   - Monitor logs for webhook events
+
+## 📚 Documentation
+
+- **[Webhook Setup Guide](docs/WEBHOOK_SETUP.md)** - Complete guide for setting up Monday.com webhooks
+- **[Task Notifications Feature](docs/FEATURE_TASK_NOTIFICATIONS.md)** - How real-time notifications work
+- **[Deployment Report](DEPLOYMENT_REPORT.md)** - Production deployment details
+- **[Configuration Status](RENDER_CONFIG_STATUS.md)** - Current configuration state
+
+## 🧪 Testing
+
+### Run Tests
 ```bash
-git clone https://github.com/usvsthem-notdev/monday-slack-automation.git
-cd monday-slack-automation
-npm install
+# Test automation
+node tests/automation.test.js
+
+# Test webhook handler
+node tests/webhook.test.js
 ```
 
-### 2. Configure Environment Variables
+### Manual Testing
 
-Copy `.env.example` to `.env` and fill in:
-
+**Test Webhook Endpoint**:
 ```bash
-MONDAY_API_KEY=your_monday_api_key
-SLACK_BOT_TOKEN=xoxb-your-bot-token
-SLACK_SIGNING_SECRET=your-signing-secret
-PORT=10000
-TEST_MODE=false
+curl -X POST https://your-server.com/webhook/monday \
+  -H "Content-Type: application/json" \
+  -d '{"challenge":"test_challenge"}'
 ```
 
-### 3. Set Up Slack App
-
-#### A. Create Slack App
-
-1. Go to [api.slack.com/apps](https://api.slack.com/apps)
-2. Click **Create New App** → **From scratch**
-3. Name it "Monday Tasks" and select your workspace
-
-#### B. Configure Bot Permissions
-
-Go to **OAuth & Permissions** and add these scopes:
-
-- `chat:write`
-- `users:read`
-- `users:read.email`
-- `im:write`
-- `commands`
-
-#### C. Enable Interactive Components
-
-1. Go to **Interactivity & Shortcuts**
-2. Turn on **Interactivity**
-3. Set **Request URL** to: `https://your-app.onrender.com/slack/events`
-4. Save Changes
-
-#### D. Create Slash Command
-
-1. Go to **Slash Commands**
-2. Click **Create New Command**
-3. Set:
-   - **Command**: `/tasks`
-   - **Request URL**: `https://your-app.onrender.com/slack/events`
-   - **Short Description**: "Fetch my Monday.com tasks"
-4. Save
-
-#### E. Install App to Workspace
-
-1. Go to **OAuth & Permissions**
-2. Click **Install to Workspace**
-3. Copy the **Bot User OAuth Token** (starts with `xoxb-`)
-
-#### F. Get Signing Secret
-
-1. Go to **Basic Information**
-2. Under **App Credentials**, copy the **Signing Secret**
-
-### 4. Get Monday.com API Key
-
-1. Go to your Monday.com account
-2. Click your profile picture → **Admin** → **API**
-3. Generate a new API token
-4. Copy the token
-
-### 5. Deploy to Render
-
-#### A. Create Web Service
-
-1. Go to [render.com](https://render.com)
-2. Click **New** → **Web Service**
-3. Connect your GitHub repository
-4. Configure:
-   - **Name**: `monday-slack-automation`
-   - **Environment**: `Node`
-   - **Build Command**: `npm install`
-   - **Start Command**: `npm start`
-   - **Plan**: Free (or higher)
-
-#### B. Add Environment Variables
-
-In Render dashboard, add:
-
-- `MONDAY_API_KEY`
-- `SLACK_BOT_TOKEN`
-- `SLACK_SIGNING_SECRET`
-- `PORT` = `10000`
-- `TEST_MODE` = `false`
-
-#### C. Deploy
-
-1. Click **Create Web Service**
-2. Wait for deployment to complete
-3. Copy your Render URL (e.g., `https://your-app.onrender.com`)
-
-#### D. Update Slack URLs
-
-Go back to your Slack app settings and update:
-
-- **Interactivity Request URL**: `https://your-app.onrender.com/slack/events`
-- **Slash Command Request URL**: `https://your-app.onrender.com/slack/events`
-
-### 6. Test It Out!
-
-1. Go to any Slack channel
-2. Type `/tasks`
-3. Check your DMs for your task list with interactive buttons!
-
-## 🎮 Usage
-
-### Slash Command
-
-```
-/tasks
-```
-
-Instantly fetches your latest Monday.com tasks and sends them to your DM.
-
-### Interactive Buttons
-
-Each task has buttons:
-
-- **✓ Complete** - Mark task as done
-- **✏️ Update** - Update task details
-- **📅 +1 Day** - Postpone by one day
-- **View** - Open task in Monday.com
-
-### Manual Trigger (HTTP)
-
+**Test Health Endpoint**:
 ```bash
-curl -X POST https://your-app.onrender.com/trigger
+curl https://your-server.com/health
 ```
 
-## 📊 API Endpoints
+## 📡 API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Service info and status |
-| `/health` | GET | Health check with metrics |
-| `/metrics` | GET | Detailed runtime metrics |
-| `/trigger` | POST | Manually trigger automation |
-| `/slack/events` | POST | Slack events (buttons & commands) |
+| `/` | GET | Service status and info |
+| `/health` | GET | Health check |
+| `/metrics` | GET | Service metrics |
+| `/trigger` | POST | Manual automation trigger |
+| `/slack/events` | POST | Slack events endpoint |
+| `/webhook/monday` | POST | **Monday.com webhook endpoint** |
 
-## 🔧 Configuration
+## 🔍 Monitoring
 
-### Workspace IDs
+### Check Server Status
+```bash
+curl https://your-server.onrender.com/health
+```
 
-Edit `src/automation.js` line ~209 to customize workspace IDs:
+### View Metrics
+```bash
+curl https://your-server.onrender.com/metrics
+```
 
+### View Logs (Render)
+1. Go to Render Dashboard
+2. Select your service
+3. Click "Logs" tab
+4. Filter by log level (info, error, success)
+
+### Key Metrics
+- Users processed
+- Tasks found
+- Messages sent/updated
+- Webhook events received
+- Notifications delivered
+- Errors encountered
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MONDAY_API_KEY` | Yes | Monday.com API token |
+| `SLACK_BOT_TOKEN` | Yes | Slack bot token (xoxb-...) |
+| `SLACK_SIGNING_SECRET` | Yes | Slack signing secret |
+| `PORT` | No | Server port (default: 3000) |
+| `TEST_MODE` | No | Enable test mode (true/false) |
+
+### Customization
+
+**Modify workspaces** (in `src/automation.js`):
 ```javascript
 const workspaceIds = [12742680, 12691809, 12666498];
 ```
 
-### Schedule
-
-Edit `.github/workflows/monday-slack-sync.yml` to change schedule:
-
+**Change schedule** (in `.github/workflows/scheduled-trigger.yml`):
 ```yaml
 schedule:
-  - cron: '0 12 * * *'  # Daily at 8 AM ET (12 PM UTC)
+  - cron: '0 14 * * 1-5'  # 9 AM EST weekdays
 ```
 
-### Test Mode
-
-Set `TEST_MODE=true` to only process Connor Drexler (user ID: 89455577).
-
-## 🏗️ Architecture
-
-```
-┌─────────────┐
-│  Monday.com │
-└──────┬──────┘
-       │
-       │ GraphQL API
-       ▼
-┌─────────────────────────────┐
-│   automation.js (Node.js)   │
-│  - Slack Bolt Server        │
-│  - Express HTTP Server      │
-│  - Task Automation Logic    │
-└──────┬─────────────────┬────┘
-       │                 │
-       │ Slack API       │ HTTP
-       ▼                 ▼
-┌──────────┐      ┌─────────────┐
-│  Slack   │      │   Render    │
-│  Users   │      │  Platform   │
-└──────────┘      └─────────────┘
+**Customize notification format** (in `src/webhookHandler.js`):
+```javascript
+function formatTaskNotification(task, assignedUserName) {
+  // Modify message blocks here
+}
 ```
 
 ## 🐛 Troubleshooting
 
-### Buttons Not Working
+### Common Issues
 
-- ✅ Verify `SLACK_SIGNING_SECRET` is set
-- ✅ Check Interactivity URL in Slack app settings
-- ✅ Ensure URL ends with `/slack/events`
+**Issue**: Webhook not receiving events
+- **Solution**: Verify server is publicly accessible and webhook URL is correct
+- **Check**: `curl https://your-server.com/health` should return 200
 
-### `/tasks` Command Not Found
+**Issue**: Notifications not sending to Slack
+- **Solution**: Ensure user's Monday.com email matches their Slack email
+- **Check**: Server logs for "Slack user not found" errors
 
-- ✅ Verify slash command is created in Slack app
-- ✅ Check Request URL points to your Render deployment
-- ✅ Reinstall app to workspace if needed
+**Issue**: Task assignment detected but no notification
+- **Solution**: Verify the column type is `multiple-person`
+- **Check**: Review webhook event in server logs
 
-### Tasks Not Syncing
+**Issue**: Scheduled automation not running
+- **Solution**: Check GitHub Actions workflow is enabled
+- **Check**: Verify cron schedule and time zone
 
-- ✅ Check Render logs for errors
-- ✅ Verify Monday.com API key is valid
-- ✅ Ensure workspace IDs are correct
-- ✅ Check GitHub Actions are running
+### Debug Mode
 
-### User Not Found
-
-- ✅ Verify user's Slack email matches Monday.com email
-- ✅ Check user is not a guest in Monday.com
-- ✅ Ensure user is enabled in Monday.com
-
-## 📝 Development
-
-### Run Locally
-
-```bash
-npm start
+Enable detailed logging:
+```javascript
+// In src/automation.js
+const TEST_MODE = true;
 ```
 
-### Test Endpoints
+This will:
+- Limit automation to test user only
+- Add verbose logging
+- Show detailed error messages
 
-```bash
-# Health check
-curl http://localhost:10000/health
+## 🛡️ Security
 
-# Trigger automation
-curl -X POST http://localhost:10000/trigger
+- All API keys stored as environment variables
+- HTTPS enforced for all endpoints
+- Slack signing secret verification
+- Monday.com webhook challenge verification
+- Rate limiting recommended for production
+- No sensitive data in logs
 
-# Get metrics
-curl http://localhost:10000/metrics
+## 📊 Architecture
+
+```
+┌───────────────────────┐
+│   GitHub Actions      │
+│   (Scheduled Trigger) │
+└───────┬───────────────┘
+        │
+        ↓ POST /trigger
+┌───────┴──────────────────────┐
+│   Render Web Service         │
+│                              │
+│  ┌────────────────────────┐ │
+│  │  Express Server        │ │
+│  │  - Slack Bolt App      │ │
+│  │  - Webhook Handler     │ │
+│  │  - Automation Logic    │ │
+│  └────────────────────────┘ │
+└──────┬──────────┬────────────┘
+       │          │
+       ↓          ↓
+  ┌─────────┐  ┌──────────────┐
+  │ Monday  │  │    Slack     │
+  │   API   │  │     API      │
+  └─────────┘  └──────────────┘
+       ↑              ↓
+       │              │
+       └──Webhooks────┘
 ```
 
-### Enable Debug Mode
+### Component Flow
 
-Set `TEST_MODE=true` in `.env` to only process one user.
+**Scheduled Automation**:
+1. GitHub Actions triggers at 9 AM EST
+2. Makes POST request to `/trigger`
+3. Server fetches all boards and users
+4. Processes tasks for each user
+5. Sends/updates Slack messages
 
-## 🔐 Security
+**Real-Time Notifications**:
+1. User assigned to task in Monday.com
+2. Monday.com sends webhook to `/webhook/monday`
+3. Server validates and processes event
+4. Fetches task and user details
+5. Sends immediate Slack notification
 
-- ✅ Never commit `.env` file
-- ✅ Use environment variables for all secrets
-- ✅ Slack signing secret validates all requests
-- ✅ API keys stored securely in Render
+## 🤝 Contributing
 
-## 📦 Dependencies
+Contributions are welcome! Please follow these steps:
 
-- `@slack/bolt` - Slack app framework
-- `@slack/web-api` - Slack Web API client
-- `axios` - HTTP client for Monday.com
-- `express` - Web server
-- `dotenv` - Environment configuration
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-## 🚀 Deployment Checklist
+## 📝 License
 
-- [ ] Create Slack app with required scopes
-- [ ] Enable interactivity and slash commands
-- [ ] Get Monday.com API key
-- [ ] Deploy to Render
-- [ ] Add environment variables to Render
-- [ ] Update Slack app URLs with Render URL
-- [ ] Test `/tasks` command
-- [ ] Test interactive buttons
-- [ ] Verify GitHub Actions schedule
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-## 📄 License
+## 👤 Author
 
-MIT License - See LICENSE file for details
+**Connor Drexler**
+- GitHub: [@usvsthem-notdev](https://github.com/usvsthem-notdev)
 
-## 👨‍💻 Author
+## 🙏 Acknowledgments
 
-Connor Drexler - [usvsthem-notdev](https://github.com/usvsthem-notdev)
+- Monday.com API Documentation
+- Slack Bolt SDK
+- Render Platform
+- Open source community
 
-## 🙏 Support
+## 📮 Support
 
-For issues or questions:
-1. Check the troubleshooting section
-2. Open a GitHub issue
-3. Review Render logs at `https://dashboard.render.com`
+For support, questions, or feature requests:
+- Open an issue on GitHub
+- Check existing documentation
+- Review server logs for debugging
 
 ---
 
-**Made with ❤️ for the Drexcorp team**
+**Version**: 4.1.0  
+**Last Updated**: October 2025  
+**Status**: ✅ Production Ready
