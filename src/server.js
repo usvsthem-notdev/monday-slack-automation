@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { App, ExpressReceiver } = require('@slack/bolt');
 const axios = require('axios');
+const { handleWebhook } = require('./webhookHandler');
 
 // Configuration
 const MONDAY_API_KEY = process.env.MONDAY_API_KEY;
@@ -13,6 +14,9 @@ const receiver = new ExpressReceiver({
   signingSecret: SLACK_SIGNING_SECRET,
   endpoints: '/slack/events'
 });
+
+// Add body parser middleware for webhooks
+receiver.app.use('/webhook/monday', require('express').json());
 
 // Initialize Slack Bolt app
 const app = new App({
@@ -44,6 +48,15 @@ async function mondayQuery(query) {
 
 // Store task metadata (in production, use a database)
 const taskMetadata = new Map();
+
+// ============================================
+// MONDAY.COM WEBHOOK ENDPOINT
+// ============================================
+
+// Monday.com webhook endpoint for task assignments
+receiver.app.post('/webhook/monday', handleWebhook);
+
+console.log('✅ Monday.com webhook endpoint registered at POST /webhook/monday');
 
 // ============================================
 // SLACK INTERACTIVE COMPONENTS
@@ -88,7 +101,6 @@ app.action(/^task_action_.*/, async ({ action, ack, body, client }) => {
 // Handle task completion
 async function handleCompleteTask(taskId, boardId, userId, client, body) {
   try {
-    // Get board info to find status column
     const boardQuery = `
       query {
         boards(ids: [${boardId}]) {
@@ -111,7 +123,6 @@ async function handleCompleteTask(taskId, boardId, userId, client, body) {
     const statusSettings = JSON.parse(statusColumn.settings_str || '{}');
     const doneIndex = statusSettings.done_colors?.[0] || 1;
     
-    // Update task status to "Done"
     const updateQuery = `
       mutation {
         change_column_value(
@@ -127,7 +138,6 @@ async function handleCompleteTask(taskId, boardId, userId, client, body) {
     
     await mondayQuery(updateQuery);
     
-    // Send confirmation message
     await client.chat.postEphemeral({
       channel: body.channel.id,
       user: userId,
@@ -139,25 +149,10 @@ async function handleCompleteTask(taskId, boardId, userId, client, body) {
             type: 'mrkdwn',
             text: '✅ *Task completed!*\nYour task has been marked as "Done" in Monday.com.'
           }
-        },
-        {
-          type: 'actions',
-          elements: [
-            {
-              type: 'button',
-              text: {
-                type: 'plain_text',
-                text: 'Undo'
-              },
-              action_id: `task_action_undo_${taskId}_${boardId}`,
-              style: 'danger'
-            }
-          ]
         }
       ]
     });
     
-    // Refresh the main message
     await refreshTaskList(userId, client);
     
   } catch (error) {
@@ -169,7 +164,6 @@ async function handleCompleteTask(taskId, boardId, userId, client, body) {
 // Handle task update (opens modal)
 async function handleUpdateTask(taskId, boardId, userId, client, body) {
   try {
-    // Get current task data
     const taskQuery = `
       query {
         items(ids: [${taskId}]) {
@@ -188,7 +182,6 @@ async function handleUpdateTask(taskId, boardId, userId, client, body) {
     const taskData = await mondayQuery(taskQuery);
     const task = taskData.items[0];
     
-    // Get board columns
     const boardQuery = `
       query {
         boards(ids: [${boardId}]) {
@@ -205,7 +198,6 @@ async function handleUpdateTask(taskId, boardId, userId, client, body) {
     const boardData = await mondayQuery(boardQuery);
     const columns = boardData.boards[0].columns;
     
-    // Build modal blocks
     const blocks = [
       {
         type: 'section',
@@ -219,7 +211,6 @@ async function handleUpdateTask(taskId, boardId, userId, client, body) {
       }
     ];
     
-    // Add status dropdown
     const statusColumn = columns.find(c => c.type === 'status');
     if (statusColumn) {
       const settings = JSON.parse(statusColumn.settings_str || '{}');
@@ -251,7 +242,6 @@ async function handleUpdateTask(taskId, boardId, userId, client, body) {
       });
     }
     
-    // Add date picker
     const dateColumn = columns.find(c => c.type === 'date');
     if (dateColumn) {
       const currentDate = task.column_values.find(cv => cv.id === dateColumn.id);
@@ -277,7 +267,6 @@ async function handleUpdateTask(taskId, boardId, userId, client, body) {
       });
     }
     
-    // Add notes field
     blocks.push({
       type: 'input',
       block_id: 'notes_block',
@@ -297,7 +286,6 @@ async function handleUpdateTask(taskId, boardId, userId, client, body) {
       optional: true
     });
     
-    // Open modal
     await client.views.open({
       trigger_id: body.trigger_id,
       view: {
@@ -336,7 +324,6 @@ app.view(/^update_task_modal_.*/, async ({ ack, body, view, client }) => {
     const values = view.state.values;
     const updates = [];
     
-    // Get board info
     const boardQuery = `
       query {
         boards(ids: [${boardId}]) {
@@ -351,7 +338,6 @@ app.view(/^update_task_modal_.*/, async ({ ack, body, view, client }) => {
     const boardData = await mondayQuery(boardQuery);
     const columns = boardData.boards[0].columns;
     
-    // Process status update
     if (values.status_block?.status_select?.selected_option) {
       const [columnId, statusIndex] = values.status_block.status_select.selected_option.value.split(':');
       updates.push({
@@ -360,7 +346,6 @@ app.view(/^update_task_modal_.*/, async ({ ack, body, view, client }) => {
       });
     }
     
-    // Process date update
     if (values.date_block?.date_select?.selected_date) {
       const dateColumn = columns.find(c => c.type === 'date');
       if (dateColumn) {
@@ -371,7 +356,6 @@ app.view(/^update_task_modal_.*/, async ({ ack, body, view, client }) => {
       }
     }
     
-    // Process notes
     const notes = values.notes_block?.notes_input?.value;
     if (notes) {
       const createUpdateQuery = `
@@ -387,7 +371,6 @@ app.view(/^update_task_modal_.*/, async ({ ack, body, view, client }) => {
       await mondayQuery(createUpdateQuery);
     }
     
-    // Apply all column updates
     for (const update of updates) {
       const updateQuery = `
         mutation {
@@ -404,14 +387,12 @@ app.view(/^update_task_modal_.*/, async ({ ack, body, view, client }) => {
       await mondayQuery(updateQuery);
     }
     
-    // Send confirmation
     await client.chat.postEphemeral({
       channel: body.user.id,
       user: userId,
       text: '✅ Task updated successfully in Monday.com!'
     });
     
-    // Refresh task list
     await refreshTaskList(userId, client);
     
   } catch (error) {
@@ -419,10 +400,9 @@ app.view(/^update_task_modal_.*/, async ({ ack, body, view, client }) => {
   }
 });
 
-// Handle postpone task (adds 1 day to due date)
+// Handle postpone task
 async function handlePostponeTask(taskId, boardId, userId, client, body) {
   try {
-    // Get current task date
     const taskQuery = `
       query {
         items(ids: [${taskId}]) {
@@ -447,7 +427,6 @@ async function handlePostponeTask(taskId, boardId, userId, client, body) {
     newDate.setDate(newDate.getDate() + 1);
     const newDateStr = newDate.toISOString().split('T')[0];
     
-    // Update date
     const updateQuery = `
       mutation {
         change_column_value(
@@ -463,14 +442,12 @@ async function handlePostponeTask(taskId, boardId, userId, client, body) {
     
     await mondayQuery(updateQuery);
     
-    // Send confirmation
     await client.chat.postEphemeral({
       channel: body.channel.id,
       user: userId,
       text: `📅 Task postponed to ${newDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
     });
     
-    // Refresh task list
     await refreshTaskList(userId, client);
     
   } catch (error) {
@@ -482,7 +459,6 @@ async function handlePostponeTask(taskId, boardId, userId, client, body) {
 // Handle view task details
 async function handleViewTask(taskId, boardId, userId, client, body) {
   try {
-    // Get full task details
     const taskQuery = `
       query {
         items(ids: [${taskId}]) {
@@ -498,9 +474,6 @@ async function handleViewTask(taskId, boardId, userId, client, body) {
             text
             value
             type
-            ... on StatusValue {
-              label
-            }
           }
           updates {
             id
@@ -517,7 +490,6 @@ async function handleViewTask(taskId, boardId, userId, client, body) {
     const taskData = await mondayQuery(taskQuery);
     const task = taskData.items[0];
     
-    // Build detailed view
     const blocks = [
       {
         type: 'header',
@@ -541,17 +513,9 @@ async function handleViewTask(taskId, boardId, userId, client, body) {
       },
       {
         type: 'divider'
-      },
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: '*Column Values:*'
-        }
       }
     ];
     
-    // Add column values
     task.column_values.filter(cv => cv.text).forEach(cv => {
       blocks.push({
         type: 'section',
@@ -562,7 +526,6 @@ async function handleViewTask(taskId, boardId, userId, client, body) {
       });
     });
     
-    // Add recent updates
     if (task.updates && task.updates.length > 0) {
       blocks.push(
         {
@@ -588,7 +551,6 @@ async function handleViewTask(taskId, boardId, userId, client, body) {
       });
     }
     
-    // Add action button to open in Monday.com
     blocks.push({
       type: 'actions',
       elements: [
@@ -604,7 +566,6 @@ async function handleViewTask(taskId, boardId, userId, client, body) {
       ]
     });
     
-    // Send ephemeral message with details
     await client.chat.postEphemeral({
       channel: body.channel.id,
       user: userId,
@@ -618,19 +579,14 @@ async function handleViewTask(taskId, boardId, userId, client, body) {
   }
 }
 
-// Refresh task list (triggers a re-send of the automation)
-async function refreshTaskList(userId, client) {
-  // This would typically trigger the main automation
-  // For now, just send a confirmation
+function refreshTaskList(userId, client) {
   console.log(`Refreshing task list for user ${userId}`);
-  // In production, you'd call the main automation function here
 }
 
 // ============================================
 // SLACK SLASH COMMANDS
 // ============================================
 
-// /tasks - Show task list
 app.command('/tasks', async ({ command, ack, client }) => {
   await ack();
   
@@ -640,16 +596,11 @@ app.command('/tasks', async ({ command, ack, client }) => {
       user: command.user_id,
       text: '🔄 Fetching your tasks from Monday.com...'
     });
-    
-    // Trigger automation for this specific user
-    // This would call your main automation function
-    
   } catch (error) {
     console.error('Error handling /tasks command:', error);
   }
 });
 
-// /task-complete [task name] - Mark task as complete
 app.command('/task-complete', async ({ command, ack, client }) => {
   await ack();
   
@@ -663,9 +614,6 @@ app.command('/task-complete', async ({ command, ack, client }) => {
     });
     return;
   }
-  
-  // Search for task and mark complete
-  // Implementation would search Monday.com for matching task
   
   await client.chat.postEphemeral({
     channel: command.channel_id,
@@ -688,7 +636,8 @@ receiver.app.get('/', (req, res) => {
     status: 'running',
     endpoints: {
       health: '/health',
-      slack_events: '/slack/events'
+      slack_events: '/slack/events',
+      monday_webhook: '/webhook/monday'
     }
   });
 });
@@ -699,7 +648,8 @@ receiver.app.get('/', (req, res) => {
     await app.start({ port: PORT, host: '0.0.0.0' });
     console.log(`⚡️ Slack interactive server running on port ${PORT}`);
     console.log(`🌐 Listening on 0.0.0.0:${PORT}`);
-    console.log(`📡 Webhook URL: /slack/events`);
+    console.log(`📡 Slack events: /slack/events`);
+    console.log(`🔔 Monday webhook: /webhook/monday`);
     console.log(`✅ Server started successfully`);
   } catch (error) {
     console.error('❌ Failed to start server:', error);
