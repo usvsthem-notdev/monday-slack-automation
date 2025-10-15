@@ -625,136 +625,147 @@ async function handleViewTask(taskId, boardId, userId, client, body) {
 
 logger.info('🔧 Registering button interaction handlers...');
 
-// Handle button clicks for task actions
-slackApp.action(/^task_action_.*/, async ({ action, ack, body, client }) => {
-  // CRITICAL: Acknowledge immediately to prevent timeout
-  await ack();
+// Handle button clicks - ULTRA FAST ACK
+slackApp.action(/^task_action_.*/, ({ action, ack, body, client }) => {
+  // CRITICAL: Call ack() synchronously and return promise immediately
+  const ackPromise = ack();
   
   metrics.buttonClicks++;
   
-  try {
-    const [_, actionType, taskId, boardId] = action.action_id.split('_');
-    const userId = body.user.id;
-    
-    logger.info(`Button clicked: ${actionType}`, { userId, taskId, boardId });
-    
-    switch (actionType) {
-      case 'complete':
-        await handleCompleteTask(taskId, boardId, userId, client, body);
-        break;
-      case 'update':
-        await handleUpdateTask(taskId, boardId, userId, client, body);
-        break;
-      case 'postpone':
-        await handlePostponeTask(taskId, boardId, userId, client, body);
-        break;
-      case 'view':
-        await handleViewTask(taskId, boardId, userId, client, body);
-        break;
-      default:
-        logger.warn(`Unknown action: ${actionType}`);
-    }
-  } catch (error) {
-    logger.error('Error handling button click', error);
+  // Process action in background without blocking
+  process.nextTick(async () => {
     try {
-      await client.chat.postEphemeral({
-        channel: body.channel?.id || body.user.id,
-        user: body.user.id,
-        text: `❌ Error: ${error.message}`
-      });
-    } catch (ephemeralError) {
-      logger.error('Failed to send error message', ephemeralError);
+      const [_, actionType, taskId, boardId] = action.action_id.split('_');
+      const userId = body.user.id;
+      
+      logger.info(`[BUTTON] ${actionType}`, { userId, taskId, boardId });
+      
+      switch (actionType) {
+        case 'complete':
+          await handleCompleteTask(taskId, boardId, userId, client, body);
+          break;
+        case 'update':
+          await handleUpdateTask(taskId, boardId, userId, client, body);
+          break;
+        case 'postpone':
+          await handlePostponeTask(taskId, boardId, userId, client, body);
+          break;
+        case 'view':
+          await handleViewTask(taskId, boardId, userId, client, body);
+          break;
+        default:
+          logger.warn(`Unknown action: ${actionType}`);
+      }
+    } catch (error) {
+      logger.error('[BUTTON ERROR]', error);
+      try {
+        await client.chat.postEphemeral({
+          channel: body.channel?.id || body.user.id,
+          user: body.user.id,
+          text: `❌ Error: ${error.message}`
+        });
+      } catch (ephemeralError) {
+        logger.error('[BUTTON ERROR] Failed to send error', ephemeralError);
+      }
     }
-  }
+  });
+  
+  return ackPromise;
 });
 
 logger.info('✅ Button handler registered');
 
-// Handle modal submission
-slackApp.view(/^update_task_modal_.*/, async ({ ack, body, view, client }) => {
-  await ack();
+// Handle modal submission - ULTRA FAST ACK
+slackApp.view(/^update_task_modal_.*/, ({ ack, body, view, client }) => {
+  // CRITICAL: Acknowledge immediately
+  const ackPromise = ack();
   
-  try {
-    const [_, __, ___, taskId, boardId] = view.callback_id.split('_');
-    const userId = body.user.id;
-    
-    const values = view.state.values;
-    const updates = [];
-    
-    const boardQuery = `
-      query {
-        boards(ids: [${boardId}]) {
-          columns {
-            id
-            type
+  // Process asynchronously
+  process.nextTick(async () => {
+    try {
+      const [_, __, ___, taskId, boardId] = view.callback_id.split('_');
+      const userId = body.user.id;
+      
+      const values = view.state.values;
+      const updates = [];
+      
+      const boardQuery = `
+        query {
+          boards(ids: [${boardId}]) {
+            columns {
+              id
+              type
+            }
           }
         }
-      }
-    `;
-    
-    const boardData = await mondayQuery(boardQuery);
-    const columns = boardData.boards[0].columns;
-    
-    if (values.status_block?.status_select?.selected_option) {
-      const [columnId, statusIndex] = values.status_block.status_select.selected_option.value.split(':');
-      updates.push({
-        columnId,
-        value: `{"index": ${statusIndex}}`
-      });
-    }
-    
-    if (values.date_block?.date_select?.selected_date) {
-      const dateColumn = columns.find(c => c.type === 'date');
-      if (dateColumn) {
+      `;
+      
+      const boardData = await mondayQuery(boardQuery);
+      const columns = boardData.boards[0].columns;
+      
+      if (values.status_block?.status_select?.selected_option) {
+        const [columnId, statusIndex] = values.status_block.status_select.selected_option.value.split(':');
         updates.push({
-          columnId: dateColumn.id,
-          value: `{"date": "${values.date_block.date_select.selected_date}"}`
+          columnId,
+          value: `{"index": ${statusIndex}}`
         });
       }
-    }
-    
-    const notes = values.notes_block?.notes_input?.value;
-    if (notes) {
-      const createUpdateQuery = `
-        mutation {
-          create_update(
-            item_id: ${taskId},
-            body: "${notes.replace(/"/g, '\\"')}"
-          ) {
-            id
-          }
+      
+      if (values.date_block?.date_select?.selected_date) {
+        const dateColumn = columns.find(c => c.type === 'date');
+        if (dateColumn) {
+          updates.push({
+            columnId: dateColumn.id,
+            value: `{"date": "${values.date_block.date_select.selected_date}"}`
+          });
         }
-      `;
-      await mondayQuery(createUpdateQuery);
-    }
-    
-    for (const update of updates) {
-      const updateQuery = `
-        mutation {
-          change_column_value(
-            board_id: ${boardId},
-            item_id: ${taskId},
-            column_id: "${update.columnId}",
-            value: "${update.value.replace(/"/g, '\\"')}"
-          ) {
-            id
+      }
+      
+      const notes = values.notes_block?.notes_input?.value;
+      if (notes) {
+        const createUpdateQuery = `
+          mutation {
+            create_update(
+              item_id: ${taskId},
+              body: "${notes.replace(/"/g, '\\"')}"
+            ) {
+              id
+            }
           }
-        }
-      `;
-      await mondayQuery(updateQuery);
+        `;
+        await mondayQuery(createUpdateQuery);
+      }
+      
+      for (const update of updates) {
+        const updateQuery = `
+          mutation {
+            change_column_value(
+              board_id: ${boardId},
+              item_id: ${taskId},
+              column_id: "${update.columnId}",
+              value: "${update.value.replace(/"/g, '\\"')}"
+            ) {
+              id
+            }
+          }
+        `;
+        await mondayQuery(updateQuery);
+      }
+      
+      await client.chat.postEphemeral({
+        channel: body.user.id,
+        user: userId,
+        text: '✅ Task updated successfully in Monday.com!'
+      });
+      
+      logger.success('Task updated via modal', { taskId, boardId, userId });
+      
+    } catch (error) {
+      logger.error('[MODAL ERROR]', error);
     }
-    
-    await client.chat.postEphemeral({
-      channel: body.user.id,
-      user: userId,
-      text: '✅ Task updated successfully in Monday.com!'
-    });
-    
-    logger.success('Task updated via modal', { taskId, boardId, userId });
-    
-  } catch (error) {
-    logger.error('Error processing modal submission', error);
-  }
+  });
+  
+  return ackPromise;
 });
 
 logger.info('✅ Modal handler registered');
@@ -781,7 +792,20 @@ receiver.app.post('/trigger', async (req, res) => {
 });
 
 receiver.app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime(), lastRun: metrics.lastRun, metrics }));
-receiver.app.get('/', (req, res) => res.json({ message: 'Monday → Slack Automation', version: '4.8.1', status: 'running', lastRun: metrics.lastRun, buttonsEnabled: true }));
+receiver.app.get('/', (req, res) => res.json({ 
+  message: 'Monday → Slack Automation', 
+  version: '4.9.2-unified', 
+  status: 'running', 
+  lastRun: metrics.lastRun, 
+  buttonsEnabled: true,
+  endpoints: {
+    health: '/health',
+    metrics: '/metrics',
+    trigger: '/trigger',
+    slack_events: '/slack/events',
+    monday_webhook: '/webhook/monday'
+  }
+}));
 receiver.app.get('/metrics', (req, res) => res.json({ ...metrics, uptime: process.uptime(), timestamp: new Date().toISOString() }));
 
 // Initialize and start server
@@ -802,6 +826,7 @@ receiver.app.get('/metrics', (req, res) => res.json({ ...metrics, uptime: proces
     logger.success('✅ Commands: /create-task, /quick-task, /monday-help, /tasks');
     logger.success('🔘 Interactive buttons enabled: Complete, Update, Postpone, View');
     logger.success('📡 Webhook endpoint: /webhook/monday');
+    logger.success('🚀 Version: 4.9.2-unified with ultra-fast ack()');
   } catch (error) {
     logger.error('❌ Failed to start server', error);
     process.exit(1);
