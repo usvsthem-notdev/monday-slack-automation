@@ -3,6 +3,7 @@ const { WebClient } = require('@slack/web-api');
 const { App, ExpressReceiver } = require('@slack/bolt');
 const axios = require('axios');
 const express = require('express');
+const path = require('path');
 const { initializeSlackCommands } = require('./slackCommands');
 const { handleWebhook } = require('./webhookHandler');
 
@@ -24,6 +25,9 @@ const receiver = new ExpressReceiver({
 
 // CRITICAL: Add JSON body parser middleware BEFORE defining routes
 receiver.app.use(express.json());
+
+// Serve static files from public directory
+receiver.app.use(express.static(path.join(__dirname, '../public')));
 
 // Initialize Slack Bolt App with custom receiver
 const slackApp = new App({
@@ -554,13 +558,14 @@ async function startServer() {
     logger.info('⏰ Automation will run on scheduled trigger (9 AM EST weekdays)');
     logger.info('💡 Manual trigger available at POST /trigger');
     logger.info('🔔 Webhook endpoint ready at POST /webhook/monday');
+    logger.info('🌐 HTML trigger page at /trigger.html');
     
     // Start Slack Bolt receiver (handles slash commands)
     await slackApp.start(PORT);
     
     logger.success(`⚡️ Server running on port ${PORT}`);
     logger.info(`🌐 Listening on 0.0.0.0:${PORT}`);
-    logger.success('✅ Slack commands ready: /create-task, /quick-task, /monday-help');
+    logger.success('✅ Slack commands ready: /create-task, /quick-task, /monday-help, /tasks');
     logger.info('📅 Scheduled automation: 9 AM EST weekdays (GitHub Actions)');
     logger.info('✅ Service ready');
     
@@ -630,12 +635,13 @@ receiver.app.get('/', (req, res) => {
   res.json({ 
     message: 'Monday.com → Slack Automation Service',
     status: 'running',
-    version: '4.4.0',
+    version: '4.5.0',
     mode: 'scheduled',
     schedule: '9:00 AM EST weekdays',
     endpoints: {
       health: '/health',
       trigger: '/trigger (POST)',
+      triggerPage: '/trigger.html (GET)',
       webhook: '/webhook/monday (POST)',
       slack: '/slack/events (Slack commands)'
     },
@@ -651,6 +657,16 @@ receiver.app.get('/metrics', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+
+// Export for use in slackCommands
+module.exports = {
+  runAutomation,
+  getAllBoards,
+  getUserTasksFromBoard,
+  organizeTasks,
+  formatSlackMessage,
+  slack
+};
 
 // Start the service
 startServer();
