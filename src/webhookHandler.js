@@ -241,8 +241,16 @@ async function sendSlackNotification(userEmail, message) {
 function extractNewlyAssignedUsers(event) {
   const newlyAssignedUsers = [];
   
+  // Log the full event for debugging
+  logger.info('Extracting newly assigned users', { 
+    columnId: event.columnId,
+    value: event.value,
+    previousValue: event.previousValue
+  });
+  
   // Check if the event is about a people column change
   if (!event.columnId || !event.value) {
+    logger.info('No columnId or value in event');
     return newlyAssignedUsers;
   }
   
@@ -251,9 +259,13 @@ function extractNewlyAssignedUsers(event) {
     const newValue = JSON.parse(event.value.value || '{}');
     const newPersonsAndTeams = newValue.personsAndTeams || [];
     
+    logger.info('Parsed new value', { newPersonsAndTeams });
+    
     // Parse the previous value (before change)
     const previousValue = event.previousValue ? JSON.parse(event.previousValue.value || '{}') : {};
     const previousPersonsAndTeams = previousValue.personsAndTeams || [];
+    
+    logger.info('Parsed previous value', { previousPersonsAndTeams });
     
     // Find users who are in the new list but not in the previous list
     const previousUserIds = new Set(
@@ -262,8 +274,11 @@ function extractNewlyAssignedUsers(event) {
         .map(p => String(p.id))
     );
     
+    logger.info('Previous user IDs', { previousUserIds: Array.from(previousUserIds) });
+    
     newPersonsAndTeams.forEach(person => {
       if (person.kind === 'person' && !previousUserIds.has(String(person.id))) {
+        logger.info('Found newly assigned user', { userId: person.id });
         newlyAssignedUsers.push(person.id);
       }
     });
@@ -296,7 +311,9 @@ async function handleWebhook(req, res) {
       type: event.type,
       boardId: event.boardId,
       itemId: event.pulseId,
-      columnId: event.columnId
+      columnId: event.columnId,
+      columnType: event.columnType,
+      fullEvent: event
     });
     
     // Respond immediately to Monday.com
@@ -316,9 +333,19 @@ async function handleWebhook(req, res) {
 // Process webhook event asynchronously
 async function processWebhookEvent(event) {
   try {
-    // Check if this is a people column update
-    if (!event.columnId || !event.columnType || event.columnType !== 'multiple-person') {
-      logger.info('Event is not a people column update, skipping');
+    logger.info('Processing webhook event', { event });
+    
+    // Check if this is a people column update - be more flexible with column type checking
+    const isPeopleColumn = event.columnType === 'multiple-person' || 
+                          event.columnType === 'people' ||
+                          event.columnType === 'person' ||
+                          (event.value && event.value.value && event.value.value.includes('personsAndTeams'));
+    
+    if (!event.columnId || !isPeopleColumn) {
+      logger.info('Event is not a people column update, skipping', { 
+        columnType: event.columnType,
+        hasColumnId: !!event.columnId 
+      });
       return;
     }
     
