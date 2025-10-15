@@ -255,14 +255,16 @@ function extractNewlyAssignedUsers(event) {
   }
   
   try {
-    // Parse the new value (current assignments)
-    const newValue = JSON.parse(event.value.value || '{}');
+    // FIXED: The value is already the object, not nested
+    // Monday sends: { value: { personsAndTeams: [...] } }
+    // NOT: { value: { value: "{...}" } }
+    const newValue = event.value;
     const newPersonsAndTeams = newValue.personsAndTeams || [];
     
     logger.info('Parsed new value', { newPersonsAndTeams });
     
     // Parse the previous value (before change)
-    const previousValue = event.previousValue ? JSON.parse(event.previousValue.value || '{}') : {};
+    const previousValue = event.previousValue || {};
     const previousPersonsAndTeams = previousValue.personsAndTeams || [];
     
     logger.info('Parsed previous value', { previousPersonsAndTeams });
@@ -312,8 +314,7 @@ async function handleWebhook(req, res) {
       boardId: event.boardId,
       itemId: event.pulseId,
       columnId: event.columnId,
-      columnType: event.columnType,
-      fullEvent: event
+      columnType: event.columnType
     });
     
     // Respond immediately to Monday.com
@@ -333,13 +334,15 @@ async function handleWebhook(req, res) {
 // Process webhook event asynchronously
 async function processWebhookEvent(event) {
   try {
-    logger.info('Processing webhook event', { event });
+    logger.info('Processing webhook event', { 
+      columnType: event.columnType,
+      hasValue: !!event.value
+    });
     
-    // Check if this is a people column update - be more flexible with column type checking
+    // Check if this is a people column update
     const isPeopleColumn = event.columnType === 'multiple-person' || 
                           event.columnType === 'people' ||
-                          event.columnType === 'person' ||
-                          (event.value && event.value.value && event.value.value.includes('personsAndTeams'));
+                          event.columnType === 'person';
     
     if (!event.columnId || !isPeopleColumn) {
       logger.info('Event is not a people column update, skipping', { 
