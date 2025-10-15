@@ -570,17 +570,21 @@ async function startServer() {
 // HTTP ENDPOINTS
 // ============================================
 
-// Monday.com webhook endpoint
+// Monday.com webhook endpoint - properly handle challenge and events
 receiver.app.post('/webhook/monday', async (req, res) => {
   metrics.webhooksReceived++;
-  logger.info('Webhook event received', { body: req.body });
   
   try {
-    await handleWebhook(req, res, slack, mondayQuery);
+    // Pass req and res directly to handleWebhook - it handles both challenge and events
+    await handleWebhook(req, res);
     metrics.notificationsSent++;
   } catch (error) {
     logger.error('Webhook handler error', error);
     metrics.errors++;
+    // Only send response if not already sent
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
   }
 });
 
@@ -622,7 +626,7 @@ receiver.app.get('/', (req, res) => {
   res.json({ 
     message: 'Monday.com → Slack Automation Service',
     status: 'running',
-    version: '4.2.0',
+    version: '4.3.0',
     mode: 'scheduled',
     schedule: '9:00 AM EST weekdays',
     endpoints: {
