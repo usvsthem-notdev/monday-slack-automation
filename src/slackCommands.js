@@ -177,6 +177,50 @@ async function getBoardColumns(boardId) {
 // Initialize Slack App with commands
 function initializeSlackCommands(slackApp) {
   
+  // Handle button clicks from webhook notifications
+  // Pattern: task_action_complete_{taskId}_{boardId}
+  slackApp.action(/^task_action_complete_/, async ({ action, ack, say, respond }) => {
+    await ack();
+    
+    try {
+      // Extract task and board IDs from action_id
+      const parts = action.action_id.split('_');
+      const taskId = parts[3];
+      const boardId = parts[4];
+      
+      logger.info('Mark complete button clicked', { taskId, boardId });
+      
+      await respond({
+        text: '✅ This would mark the task complete on Monday.com. Feature coming soon!',
+        replace_original: false,
+        response_type: 'ephemeral'
+      });
+    } catch (error) {
+      logger.error('Error handling complete button', error);
+    }
+  });
+  
+  // Handle update task button clicks
+  slackApp.action(/^task_action_update_/, async ({ action, ack, respond }) => {
+    await ack();
+    
+    try {
+      const parts = action.action_id.split('_');
+      const taskId = parts[3];
+      const boardId = parts[4];
+      
+      logger.info('Update task button clicked', { taskId, boardId });
+      
+      await respond({
+        text: '📝 This would open an update modal. Feature coming soon!',
+        replace_original: false,
+        response_type: 'ephemeral'
+      });
+    } catch (error) {
+      logger.error('Error handling update button', error);
+    }
+  });
+  
   // Main command: /create-task
   slackApp.command('/create-task', async ({ command, ack, respond, client }) => {
     await ack();
