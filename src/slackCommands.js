@@ -89,6 +89,68 @@ async function getUsers() {
   return data.users.filter(u => u.enabled);
 }
 
+// Mark task as complete on Monday.com
+async function markTaskComplete(boardId, itemId) {
+  // Get board columns to find the status column
+  const columns = await getBoardColumns(boardId);
+  const statusColumn = columns.find(c => c.type === 'status');
+  
+  if (!statusColumn) {
+    throw new Error('No status column found on this board');
+  }
+  
+  // Parse status settings to find the "Done" status
+  const statusSettings = JSON.parse(statusColumn.settings_str || '{}');
+  const statusLabels = statusSettings.labels || {};
+  const doneColors = statusSettings.done_colors || [1];
+  
+  // Find a "Done" status - look for common done labels or use the first done color
+  let doneLabel = null;
+  for (const [index, label] of Object.entries(statusLabels)) {
+    if (doneColors.includes(parseInt(index)) || 
+        label.toLowerCase().includes('done') || 
+        label.toLowerCase().includes('complete')) {
+      doneLabel = label;
+      break;
+    }
+  }
+  
+  // If no done label found, use the label for the first done color
+  if (!doneLabel && doneColors.length > 0) {
+    doneLabel = statusLabels[doneColors[0]];
+  }
+  
+  if (!doneLabel) {
+    throw new Error('Could not find a "Done" status on this board');
+  }
+  
+  // Update the status
+  const columnValues = {
+    [statusColumn.id]: {
+      label: doneLabel
+    }
+  };
+  
+  const columnValuesStr = JSON.stringify(columnValues).replace(/"/g, '\\"');
+  
+  const mutation = `
+    mutation {
+      change_column_value(
+        board_id: ${boardId},
+        item_id: ${itemId},
+        column_id: "${statusColumn.id}",
+        value: "${columnValuesStr}"
+      ) {
+        id
+        name
+      }
+    }
+  `;
+  
+  const data = await mondayQuery(mutation);
+  return data.change_column_value;
+}
+
 // Create a new task on Monday.com
 async function createMondayTask(boardId, taskName, assigneeIds, dueDate, status) {
   const columns = await getBoardColumns(boardId);
@@ -174,34 +236,64 @@ async function getBoardColumns(boardId) {
   return data.boards[0].columns;
 }
 
+// Get task name for display
+async function getTaskName(itemId) {
+  const query = `
+    query {
+      items(ids: [${itemId}]) {
+        id
+        name
+      }
+    }
+  `;
+  
+  const data = await mondayQuery(query);
+  return data.items[0]?.name || 'Task';
+}
+
 // Initialize Slack App with commands
 function initializeSlackCommands(slackApp) {
   
-  // Handle button clicks from webhook notifications
-  // Pattern: task_action_complete_{taskId}_{boardId}
-  slackApp.action(/^task_action_complete_/, async ({ action, ack, say, respond }) => {
+  // Handle "Mark Complete" button clicks from webhook notifications
+  slackApp.action(/^task_action_complete_/, async ({ action, ack, respond, client, body }) => {
     await ack();
     
     try {
       // Extract task and board IDs from action_id
+      // Format: task_action_complete_{taskId}_{boardId}
       const parts = action.action_id.split('_');
       const taskId = parts[3];
       const boardId = parts[4];
       
-      logger.info('Mark complete button clicked', { taskId, boardId });
+      logger.info('Mark complete button clicked', { taskId, boardId, user: body.user.id });
       
+      // Get task name first
+      const taskName = await getTaskName(taskId);
+      
+      // Mark the task as complete on Monday.com
+      await markTaskComplete(boardId, taskId);
+      
+      // Send success message
       await respond({
-        text: '✅ This would mark the task complete on Monday.com. Feature coming soon!',
+        text: `✅ Marked "${taskName}" as complete on Monday.com!`,
         replace_original: false,
         response_type: 'ephemeral'
       });
+      
+      logger.info('Task marked complete', { taskId, boardId, taskName });
+      
     } catch (error) {
-      logger.error('Error handling complete button', error);
+      logger.error('Error marking task complete', error);
+      await respond({
+        text: `❌ Failed to mark task complete: ${error.message}`,
+        replace_original: false,
+        response_type: 'ephemeral'
+      });
     }
   });
   
-  // Handle update task button clicks
-  slackApp.action(/^task_action_update_/, async ({ action, ack, respond }) => {
+  // Handle "Update Task" button clicks
+  slackApp.action(/^task_action_update_/, async ({ action, ack, client, body }) => {
     await ack();
     
     try {
@@ -211,13 +303,127 @@ function initializeSlackCommands(slackApp) {
       
       logger.info('Update task button clicked', { taskId, boardId });
       
-      await respond({
-        text: '📝 This would open an update modal. Feature coming soon!',
-        replace_original: false,
-        response_type: 'ephemeral'
+      // Get task name and board columns
+      const taskName = await getTaskName(taskId);
+      const columns = await getBoardColumns(boardId);
+      const statusColumn = columns.find(c => c.type === 'status');
+      
+      // Get available statuses
+      let statusOptions = [];
+      if (statusColumn) {
+        const statusSettings = JSON.parse(statusColumn.settings_str || '{}');
+        const statusLabels = statusSettings.labels || {};
+        statusOptions = Object.entries(statusLabels).map(([index, label]) => ({
+          text: {
+            type: 'plain_text',
+            text: label
+          },
+          value: `${taskId}_${boardId}_${statusColumn.id}_${label}`
+        }));
+      }
+      
+      // Open modal with update options
+      await client.views.open({
+        trigger_id: body.trigger_id,
+        view: {
+          type: 'modal',
+          callback_id: 'update_task_modal',
+          title: {
+            type: 'plain_text',
+            text: 'Update Task'
+          },
+          submit: {
+            type: 'plain_text',
+            text: 'Update'
+          },
+          close: {
+            type: 'plain_text',
+            text: 'Cancel'
+          },
+          private_metadata: JSON.stringify({ taskId, boardId }),
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `*Task:* ${taskName}`
+              }
+            },
+            {
+              type: 'divider'
+            },
+            ...(statusOptions.length > 0 ? [{
+              type: 'input',
+              block_id: 'status_update',
+              label: {
+                type: 'plain_text',
+                text: 'Update Status'
+              },
+              element: {
+                type: 'static_select',
+                action_id: 'status_select',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Select new status'
+                },
+                options: statusOptions
+              }
+            }] : [])
+          ]
+        }
       });
+      
     } catch (error) {
-      logger.error('Error handling update button', error);
+      logger.error('Error opening update modal', error);
+    }
+  });
+  
+  // Handle update task modal submission
+  slackApp.view('update_task_modal', async ({ ack, body, view }) => {
+    await ack();
+    
+    try {
+      const metadata = JSON.parse(view.private_metadata);
+      const { taskId, boardId } = metadata;
+      
+      const values = view.state.values;
+      
+      if (values.status_update) {
+        const selectedValue = values.status_update.status_select.selected_option.value;
+        const parts = selectedValue.split('_');
+        const statusColumnId = parts[2];
+        const statusLabel = parts.slice(3).join('_');
+        
+        // Update status on Monday
+        const columnValues = {
+          [statusColumnId]: {
+            label: statusLabel
+          }
+        };
+        
+        const columnValuesStr = JSON.stringify(columnValues).replace(/"/g, '\\"');
+        
+        const mutation = `
+          mutation {
+            change_column_value(
+              board_id: ${boardId},
+              item_id: ${taskId},
+              column_id: "${statusColumnId}",
+              value: "${columnValuesStr}"
+            ) {
+              id
+              name
+            }
+          }
+        `;
+        
+        await mondayQuery(mutation);
+        
+        logger.info('Task status updated', { taskId, boardId, newStatus: statusLabel });
+      }
+      
+    } catch (error) {
+      logger.error('Error updating task', error);
     }
   });
   
