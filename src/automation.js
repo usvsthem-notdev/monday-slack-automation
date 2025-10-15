@@ -2,6 +2,7 @@ require('dotenv').config();
 const { WebClient } = require('@slack/web-api');
 const { App, ExpressReceiver } = require('@slack/bolt');
 const axios = require('axios');
+const express = require('express');
 const { initializeSlackCommands } = require('./slackCommands');
 const { handleWebhook } = require('./webhookHandler');
 
@@ -20,6 +21,9 @@ const slack = new WebClient(SLACK_BOT_TOKEN);
 const receiver = new ExpressReceiver({
   signingSecret: SLACK_SIGNING_SECRET
 });
+
+// CRITICAL: Add JSON body parser middleware BEFORE defining routes
+receiver.app.use(express.json());
 
 // Initialize Slack Bolt App with custom receiver
 const slackApp = new App({
@@ -626,7 +630,7 @@ receiver.app.get('/', (req, res) => {
   res.json({ 
     message: 'Monday.com → Slack Automation Service',
     status: 'running',
-    version: '4.3.0',
+    version: '4.4.0',
     mode: 'scheduled',
     schedule: '9:00 AM EST weekdays',
     endpoints: {
