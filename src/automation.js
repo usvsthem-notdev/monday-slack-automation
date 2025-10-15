@@ -21,9 +21,6 @@ const receiver = new ExpressReceiver({
   signingSecret: SLACK_SIGNING_SECRET
 });
 
-// Add body parser middleware for webhooks
-receiver.app.use(require('express').json());
-
 // Initialize Slack Bolt App with custom receiver
 const slackApp = new App({
   token: SLACK_BOT_TOKEN,
@@ -326,7 +323,7 @@ function formatSlackMessage(tasks, userName) {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*${task.name}*\\n📅 ${dueDate} | 📍 ${task.boardName}`
+          text: `*${task.name}*\n📅 ${dueDate} | 📍 ${task.boardName}`
         }
       });
     });
@@ -347,7 +344,7 @@ function formatSlackMessage(tasks, userName) {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*${task.name}*\\n📍 ${task.boardName}`
+          text: `*${task.name}*\n📍 ${task.boardName}`
         }
       });
     });
@@ -369,7 +366,7 @@ function formatSlackMessage(tasks, userName) {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `*${task.name}*\\n📅 ${dueDate} | 📍 ${task.boardName}`
+          text: `*${task.name}*\n📅 ${dueDate} | 📍 ${task.boardName}`
         }
       });
     });
@@ -539,4 +536,113 @@ async function runAutomation() {
   }
 }
 
-// ============================================\n// START SERVER - NO AUTOMATION ON STARTUP\n// ============================================\n\nasync function startServer() {\n  try {\n    // Initialize Slack commands\n    logger.info('Initializing Slack commands...');\n    initializeSlackCommands(slackApp);\n    \n    // DO NOT run automation on startup - wait for scheduled trigger\n    logger.info('⏰ Automation will run on scheduled trigger (9 AM EST weekdays)');\n    logger.info('💡 Manual trigger available at POST /trigger');\n    logger.info('🔔 Webhook endpoint ready at POST /webhook/monday');\n    \n    // Start Slack Bolt receiver (handles slash commands)\n    await slackApp.start(PORT);\n    \n    logger.success(`⚡️ Server running on port ${PORT}`);\n    logger.info(`🌐 Listening on 0.0.0.0:${PORT}`);\n    logger.success('✅ Slack commands ready: /create-task, /quick-task, /monday-help');\n    logger.info('📅 Scheduled automation: 9 AM EST weekdays (GitHub Actions)');\n    logger.info('✅ Service ready');\n    \n  } catch (error) {\n    logger.error('❌ Failed to start service', error);\n    process.exit(1);\n  }\n}\n\n// ============================================\n// HTTP ENDPOINTS\n// ============================================\n\n// Monday.com webhook endpoint\nreceiver.app.post('/webhook/monday', (req, res) => {\n  metrics.webhooksReceived++;\n  handleWebhook(req, res);\n});\n\n// Manual trigger endpoint\nreceiver.app.post('/trigger', async (req, res) => {\n  logger.info('Manual automation trigger received');\n  \n  res.json({ \n    status: 'triggered', \n    message: 'Automation started',\n    timestamp: new Date().toISOString()\n  });\n  \n  runAutomation().catch(error => {\n    logger.error('Manual trigger failed', error);\n  });\n});\n\n// Health check endpoint\nreceiver.app.get('/health', (req, res) => {\n  res.json({ \n    status: 'ok', \n    timestamp: new Date().toISOString(),\n    uptime: process.uptime(),\n    lastRun: metrics.lastRun,\n    metrics: {\n      usersProcessed: metrics.usersProcessed,\n      messagesUpdated: metrics.messagesUpdated,\n      messagesSent: metrics.messagesSent,\n      webhooksReceived: metrics.webhooksReceived,\n      errors: metrics.errors\n    }\n  });\n});\n\n// Root endpoint\nreceiver.app.get('/', (req, res) => {\n  res.json({ \n    message: 'Monday.com → Slack Automation Service',\n    status: 'running',\n    version: '4.1.0',\n    mode: 'scheduled',\n    schedule: '9:00 AM EST weekdays',\n    endpoints: {\n      health: '/health',\n      trigger: '/trigger (POST)',\n      webhook: '/webhook/monday (POST)',\n      slack: '/slack/events (Slack commands)'\n    },\n    lastRun: metrics.lastRun\n  });\n});\n\n// Metrics endpoint\nreceiver.app.get('/metrics', (req, res) => {\n  res.json({\n    ...metrics,\n    uptime: process.uptime(),\n    timestamp: new Date().toISOString()\n  });\n});\n\n// Start the service\nstartServer();\n
+// ============================================
+// START SERVER - NO AUTOMATION ON STARTUP
+// ============================================
+
+async function startServer() {
+  try {
+    // Initialize Slack commands
+    logger.info('Initializing Slack commands...');
+    initializeSlackCommands(slackApp);
+    
+    // DO NOT run automation on startup - wait for scheduled trigger
+    logger.info('⏰ Automation will run on scheduled trigger (9 AM EST weekdays)');
+    logger.info('💡 Manual trigger available at POST /trigger');
+    logger.info('🔔 Webhook endpoint ready at POST /webhook/monday');
+    
+    // Start Slack Bolt receiver (handles slash commands)
+    await slackApp.start(PORT);
+    
+    logger.success(`⚡️ Server running on port ${PORT}`);
+    logger.info(`🌐 Listening on 0.0.0.0:${PORT}`);
+    logger.success('✅ Slack commands ready: /create-task, /quick-task, /monday-help');
+    logger.info('📅 Scheduled automation: 9 AM EST weekdays (GitHub Actions)');
+    logger.info('✅ Service ready');
+    
+  } catch (error) {
+    logger.error('❌ Failed to start service', error);
+    process.exit(1);
+  }
+}
+
+// ============================================
+// HTTP ENDPOINTS
+// ============================================
+
+// Monday.com webhook endpoint
+receiver.app.post('/webhook/monday', async (req, res) => {
+  metrics.webhooksReceived++;
+  logger.info('Webhook event received', { body: req.body });
+  
+  try {
+    await handleWebhook(req, res, slack, mondayQuery);
+    metrics.notificationsSent++;
+  } catch (error) {
+    logger.error('Webhook handler error', error);
+    metrics.errors++;
+  }
+});
+
+// Manual trigger endpoint
+receiver.app.post('/trigger', async (req, res) => {
+  logger.info('Manual automation trigger received');
+  
+  res.json({ 
+    status: 'triggered', 
+    message: 'Automation started',
+    timestamp: new Date().toISOString()
+  });
+  
+  runAutomation().catch(error => {
+    logger.error('Manual trigger failed', error);
+  });
+});
+
+// Health check endpoint
+receiver.app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    lastRun: metrics.lastRun,
+    metrics: {
+      usersProcessed: metrics.usersProcessed,
+      messagesUpdated: metrics.messagesUpdated,
+      messagesSent: metrics.messagesSent,
+      webhooksReceived: metrics.webhooksReceived,
+      notificationsSent: metrics.notificationsSent,
+      errors: metrics.errors
+    }
+  });
+});
+
+// Root endpoint
+receiver.app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Monday.com → Slack Automation Service',
+    status: 'running',
+    version: '4.2.0',
+    mode: 'scheduled',
+    schedule: '9:00 AM EST weekdays',
+    endpoints: {
+      health: '/health',
+      trigger: '/trigger (POST)',
+      webhook: '/webhook/monday (POST)',
+      slack: '/slack/events (Slack commands)'
+    },
+    lastRun: metrics.lastRun
+  });
+});
+
+// Metrics endpoint
+receiver.app.get('/metrics', (req, res) => {
+  res.json({
+    ...metrics,
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Start the service
+startServer();
