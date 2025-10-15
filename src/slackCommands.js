@@ -124,14 +124,12 @@ async function markTaskComplete(boardId, itemId) {
     throw new Error('Could not find a "Done" status on this board');
   }
   
-  // Update the status
-  const columnValues = {
-    [statusColumn.id]: {
-      label: doneLabel
-    }
+  // FIXED: For change_column_value, pass the value directly, NOT wrapped in column ID
+  const columnValue = {
+    label: doneLabel
   };
   
-  const columnValuesStr = JSON.stringify(columnValues).replace(/"/g, '\\"');
+  const columnValueStr = JSON.stringify(columnValue).replace(/"/g, '\\"');
   
   const mutation = `
     mutation {
@@ -139,7 +137,7 @@ async function markTaskComplete(boardId, itemId) {
         board_id: ${boardId},
         item_id: ${itemId},
         column_id: "${statusColumn.id}",
-        value: "${columnValuesStr}"
+        value: "${columnValueStr}"
       ) {
         id
         name
@@ -394,14 +392,12 @@ function initializeSlackCommands(slackApp) {
         const statusColumnId = parts[2];
         const statusLabel = parts.slice(3).join('_');
         
-        // Update status on Monday
-        const columnValues = {
-          [statusColumnId]: {
-            label: statusLabel
-          }
+        // FIXED: For change_column_value, pass value directly, NOT wrapped in column ID
+        const columnValue = {
+          label: statusLabel
         };
         
-        const columnValuesStr = JSON.stringify(columnValues).replace(/"/g, '\\"');
+        const columnValueStr = JSON.stringify(columnValue).replace(/"/g, '\\"');
         
         const mutation = `
           mutation {
@@ -409,7 +405,7 @@ function initializeSlackCommands(slackApp) {
               board_id: ${boardId},
               item_id: ${taskId},
               column_id: "${statusColumnId}",
-              value: "${columnValuesStr}"
+              value: "${columnValueStr}"
             ) {
               id
               name
