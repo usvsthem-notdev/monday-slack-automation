@@ -62,13 +62,14 @@ console.log('✅ Monday.com webhook endpoint registered at POST /webhook/monday'
 // SLACK INTERACTIVE COMPONENTS
 // ============================================
 
-// Handle button clicks for task actions - ACK IMMEDIATELY
-app.action(/^task_action_.*/, async ({ action, ack, body, client }) => {
-  // CRITICAL: Acknowledge IMMEDIATELY - no await, no delays
-  ack();
+// Handle button clicks for task actions - ULTRA FAST ACK
+app.action(/^task_action_.*/, ({ action, ack, body, client }) => {
+  // CRITICAL: Call ack() synchronously and IMMEDIATELY
+  // No await, no async, just return the ack promise directly
+  const ackPromise = ack();
   
-  // Now process the action asynchronously
-  setImmediate(async () => {
+  // Process action in background without blocking
+  process.nextTick(async () => {
     try {
       const [_, actionType, taskId, boardId] = action.action_id.split('_');
       const userId = body.user.id;
@@ -104,6 +105,8 @@ app.action(/^task_action_.*/, async ({ action, ack, body, client }) => {
       }
     }
   });
+  
+  return ackPromise;
 });
 
 // Handle task completion
@@ -321,13 +324,13 @@ async function handleUpdateTask(taskId, boardId, userId, client, body) {
   }
 }
 
-// Handle modal submission - ACK IMMEDIATELY
-app.view(/^update_task_modal_.*/, async ({ ack, body, view, client }) => {
+// Handle modal submission - ULTRA FAST ACK
+app.view(/^update_task_modal_.*/, ({ ack, body, view, client }) => {
   // CRITICAL: Acknowledge IMMEDIATELY
-  ack();
+  const ackPromise = ack();
   
   // Process asynchronously
-  setImmediate(async () => {
+  process.nextTick(async () => {
     try {
       const [_, __, ___, taskId, boardId] = view.callback_id.split('_');
       const userId = body.user.id;
@@ -410,6 +413,8 @@ app.view(/^update_task_modal_.*/, async ({ ack, body, view, client }) => {
       console.error('[MODAL ERROR] Error processing modal submission:', error);
     }
   });
+  
+  return ackPromise;
 });
 
 // Handle postpone task
@@ -646,7 +651,7 @@ receiver.app.get('/', (req, res) => {
   res.json({ 
     message: 'Monday.com → Slack Automation Server',
     status: 'running',
-    version: '4.9.0-hotfix',
+    version: '4.9.1-ultra-fast-ack',
     endpoints: {
       health: '/health',
       slack_events: '/slack/events',
@@ -663,7 +668,7 @@ receiver.app.get('/', (req, res) => {
     console.log(`🌐 Listening on 0.0.0.0:${PORT}`);
     console.log(`📡 Slack events: /slack/events`);
     console.log(`🔔 Monday webhook: /webhook/monday`);
-    console.log(`✅ Server started successfully`);
+    console.log(`✅ Server started successfully - v4.9.1`);
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
