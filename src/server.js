@@ -62,40 +62,48 @@ console.log('✅ Monday.com webhook endpoint registered at POST /webhook/monday'
 // SLACK INTERACTIVE COMPONENTS
 // ============================================
 
-// Handle button clicks for task actions
+// Handle button clicks for task actions - ACK IMMEDIATELY
 app.action(/^task_action_.*/, async ({ action, ack, body, client }) => {
-  await ack();
+  // CRITICAL: Acknowledge IMMEDIATELY - no await, no delays
+  ack();
   
-  try {
-    const [_, actionType, taskId, boardId] = action.action_id.split('_');
-    const userId = body.user.id;
-    
-    console.log(`User ${userId} triggered ${actionType} on task ${taskId}`);
-    
-    switch (actionType) {
-      case 'complete':
-        await handleCompleteTask(taskId, boardId, userId, client, body);
-        break;
-      case 'update':
-        await handleUpdateTask(taskId, boardId, userId, client, body);
-        break;
-      case 'postpone':
-        await handlePostponeTask(taskId, boardId, userId, client, body);
-        break;
-      case 'view':
-        await handleViewTask(taskId, boardId, userId, client, body);
-        break;
-      default:
-        console.log(`Unknown action: ${actionType}`);
+  // Now process the action asynchronously
+  setImmediate(async () => {
+    try {
+      const [_, actionType, taskId, boardId] = action.action_id.split('_');
+      const userId = body.user.id;
+      
+      console.log(`[BUTTON] User ${userId} triggered ${actionType} on task ${taskId}`);
+      
+      switch (actionType) {
+        case 'complete':
+          await handleCompleteTask(taskId, boardId, userId, client, body);
+          break;
+        case 'update':
+          await handleUpdateTask(taskId, boardId, userId, client, body);
+          break;
+        case 'postpone':
+          await handlePostponeTask(taskId, boardId, userId, client, body);
+          break;
+        case 'view':
+          await handleViewTask(taskId, boardId, userId, client, body);
+          break;
+        default:
+          console.log(`Unknown action: ${actionType}`);
+      }
+    } catch (error) {
+      console.error('[BUTTON ERROR] Error handling button click:', error);
+      try {
+        await client.chat.postEphemeral({
+          channel: body.channel?.id || body.user.id,
+          user: body.user.id,
+          text: `❌ Error: ${error.message}`
+        });
+      } catch (notifyError) {
+        console.error('[BUTTON ERROR] Failed to send error notification:', notifyError);
+      }
     }
-  } catch (error) {
-    console.error('Error handling button click:', error);
-    await client.chat.postEphemeral({
-      channel: body.channel.id,
-      user: body.user.id,
-      text: `❌ Error: ${error.message}`
-    });
-  }
+  });
 });
 
 // Handle task completion
@@ -139,7 +147,7 @@ async function handleCompleteTask(taskId, boardId, userId, client, body) {
     await mondayQuery(updateQuery);
     
     await client.chat.postEphemeral({
-      channel: body.channel.id,
+      channel: body.channel?.id || body.user.id,
       user: userId,
       text: `✅ Task marked as complete in Monday.com!`,
       blocks: [
@@ -313,91 +321,95 @@ async function handleUpdateTask(taskId, boardId, userId, client, body) {
   }
 }
 
-// Handle modal submission
+// Handle modal submission - ACK IMMEDIATELY
 app.view(/^update_task_modal_.*/, async ({ ack, body, view, client }) => {
-  await ack();
+  // CRITICAL: Acknowledge IMMEDIATELY
+  ack();
   
-  try {
-    const [_, __, ___, taskId, boardId] = view.callback_id.split('_');
-    const userId = body.user.id;
-    
-    const values = view.state.values;
-    const updates = [];
-    
-    const boardQuery = `
-      query {
-        boards(ids: [${boardId}]) {
-          columns {
-            id
-            type
+  // Process asynchronously
+  setImmediate(async () => {
+    try {
+      const [_, __, ___, taskId, boardId] = view.callback_id.split('_');
+      const userId = body.user.id;
+      
+      const values = view.state.values;
+      const updates = [];
+      
+      const boardQuery = `
+        query {
+          boards(ids: [${boardId}]) {
+            columns {
+              id
+              type
+            }
           }
         }
-      }
-    `;
-    
-    const boardData = await mondayQuery(boardQuery);
-    const columns = boardData.boards[0].columns;
-    
-    if (values.status_block?.status_select?.selected_option) {
-      const [columnId, statusIndex] = values.status_block.status_select.selected_option.value.split(':');
-      updates.push({
-        columnId,
-        value: `{"index": ${statusIndex}}`
-      });
-    }
-    
-    if (values.date_block?.date_select?.selected_date) {
-      const dateColumn = columns.find(c => c.type === 'date');
-      if (dateColumn) {
+      `;
+      
+      const boardData = await mondayQuery(boardQuery);
+      const columns = boardData.boards[0].columns;
+      
+      if (values.status_block?.status_select?.selected_option) {
+        const [columnId, statusIndex] = values.status_block.status_select.selected_option.value.split(':');
         updates.push({
-          columnId: dateColumn.id,
-          value: `{"date": "${values.date_block.date_select.selected_date}"}`
+          columnId,
+          value: `{"index": ${statusIndex}}`
         });
       }
-    }
-    
-    const notes = values.notes_block?.notes_input?.value;
-    if (notes) {
-      const createUpdateQuery = `
-        mutation {
-          create_update(
-            item_id: ${taskId},
-            body: "${notes.replace(/"/g, '\\"')}"
-          ) {
-            id
-          }
+      
+      if (values.date_block?.date_select?.selected_date) {
+        const dateColumn = columns.find(c => c.type === 'date');
+        if (dateColumn) {
+          updates.push({
+            columnId: dateColumn.id,
+            value: `{"date": "${values.date_block.date_select.selected_date}"}`
+          });
         }
-      `;
-      await mondayQuery(createUpdateQuery);
-    }
-    
-    for (const update of updates) {
-      const updateQuery = `
-        mutation {
-          change_column_value(
-            board_id: ${boardId},
-            item_id: ${taskId},
-            column_id: "${update.columnId}",
-            value: "${update.value.replace(/"/g, '\\"')}"
-          ) {
-            id
+      }
+      
+      const notes = values.notes_block?.notes_input?.value;
+      if (notes) {
+        const createUpdateQuery = `
+          mutation {
+            create_update(
+              item_id: ${taskId},
+              body: "${notes.replace(/"/g, '\\"')}"
+            ) {
+              id
+            }
           }
-        }
-      `;
-      await mondayQuery(updateQuery);
+        `;
+        await mondayQuery(createUpdateQuery);
+      }
+      
+      for (const update of updates) {
+        const updateQuery = `
+          mutation {
+            change_column_value(
+              board_id: ${boardId},
+              item_id: ${taskId},
+              column_id: "${update.columnId}",
+              value: "${update.value.replace(/"/g, '\\"')}"
+            ) {
+              id
+            }
+          }
+        `;
+        await mondayQuery(updateQuery);
+      }
+      
+      await client.chat.postEphemeral({
+        channel: body.user.id,
+        user: userId,
+        text: '✅ Task updated successfully in Monday.com!'
+      });
+      
+      await refreshTaskList(userId, client);
+      
+    } catch (error) {
+      console.error('[MODAL ERROR] Error processing modal submission:', error);
     }
-    
-    await client.chat.postEphemeral({
-      channel: body.user.id,
-      user: userId,
-      text: '✅ Task updated successfully in Monday.com!'
-    });
-    
-    await refreshTaskList(userId, client);
-    
-  } catch (error) {
-    console.error('Error processing modal submission:', error);
-  }
+  });
 });
 
 // Handle postpone task
@@ -443,7 +455,7 @@ async function handlePostponeTask(taskId, boardId, userId, client, body) {
     await mondayQuery(updateQuery);
     
     await client.chat.postEphemeral({
-      channel: body.channel.id,
+      channel: body.channel?.id || body.user.id,
       user: userId,
       text: `📅 Task postponed to ${newDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
     });
@@ -567,7 +579,7 @@ async function handleViewTask(taskId, boardId, userId, client, body) {
     });
     
     await client.chat.postEphemeral({
-      channel: body.channel.id,
+      channel: body.channel?.id || body.user.id,
       user: userId,
       blocks: blocks,
       text: `Details for task: ${task.name}`
@@ -634,6 +646,7 @@ receiver.app.get('/', (req, res) => {
   res.json({ 
     message: 'Monday.com → Slack Automation Server',
     status: 'running',
+    version: '4.9.0-hotfix',
     endpoints: {
       health: '/health',
       slack_events: '/slack/events',
