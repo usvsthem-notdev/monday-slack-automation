@@ -220,53 +220,6 @@ async function runAutomation() {
   }
 }
 
-// ============================================
-// SLACK BUTTON INTERACTION HANDLERS
-// ============================================
-
-// Handle button clicks for task actions
-slackApp.action(/^task_action_.*/, async ({ action, ack, body, client }) => {
-  // CRITICAL: Acknowledge immediately to prevent timeout
-  await ack();
-  
-  metrics.buttonClicks++;
-  
-  try {
-    const [_, actionType, taskId, boardId] = action.action_id.split('_');
-    const userId = body.user.id;
-    
-    logger.info(`Button clicked: ${actionType}`, { userId, taskId, boardId });
-    
-    switch (actionType) {
-      case 'complete':
-        await handleCompleteTask(taskId, boardId, userId, client, body);
-        break;
-      case 'update':
-        await handleUpdateTask(taskId, boardId, userId, client, body);
-        break;
-      case 'postpone':
-        await handlePostponeTask(taskId, boardId, userId, client, body);
-        break;
-      case 'view':
-        await handleViewTask(taskId, boardId, userId, client, body);
-        break;
-      default:
-        logger.warn(`Unknown action: ${actionType}`);
-    }
-  } catch (error) {
-    logger.error('Error handling button click', error);
-    try {
-      await client.chat.postEphemeral({
-        channel: body.channel?.id || body.user.id,
-        user: body.user.id,
-        text: `❌ Error: ${error.message}`
-      });
-    } catch (ephemeralError) {
-      logger.error('Failed to send error message', ephemeralError);
-    }
-  }
-});
-
 // Handle task completion
 async function handleCompleteTask(taskId, boardId, userId, client, body) {
   try {
@@ -484,93 +437,6 @@ async function handleUpdateTask(taskId, boardId, userId, client, body) {
   }
 }
 
-// Handle modal submission
-slackApp.view(/^update_task_modal_.*/, async ({ ack, body, view, client }) => {
-  await ack();
-  
-  try {
-    const [_, __, ___, taskId, boardId] = view.callback_id.split('_');
-    const userId = body.user.id;
-    
-    const values = view.state.values;
-    const updates = [];
-    
-    const boardQuery = `
-      query {
-        boards(ids: [${boardId}]) {
-          columns {
-            id
-            type
-          }
-        }
-      }
-    `;
-    
-    const boardData = await mondayQuery(boardQuery);
-    const columns = boardData.boards[0].columns;
-    
-    if (values.status_block?.status_select?.selected_option) {
-      const [columnId, statusIndex] = values.status_block.status_select.selected_option.value.split(':');
-      updates.push({
-        columnId,
-        value: `{"index": ${statusIndex}}`
-      });
-    }
-    
-    if (values.date_block?.date_select?.selected_date) {
-      const dateColumn = columns.find(c => c.type === 'date');
-      if (dateColumn) {
-        updates.push({
-          columnId: dateColumn.id,
-          value: `{"date": "${values.date_block.date_select.selected_date}"}`
-        });
-      }
-    }
-    
-    const notes = values.notes_block?.notes_input?.value;
-    if (notes) {
-      const createUpdateQuery = `
-        mutation {
-          create_update(
-            item_id: ${taskId},
-            body: "${notes.replace(/"/g, '\\"')}"
-          ) {
-            id
-          }
-        }
-      `;
-      await mondayQuery(createUpdateQuery);
-    }
-    
-    for (const update of updates) {
-      const updateQuery = `
-        mutation {
-          change_column_value(
-            board_id: ${boardId},
-            item_id: ${taskId},
-            column_id: "${update.columnId}",
-            value: "${update.value.replace(/"/g, '\\"')}"
-          ) {
-            id
-          }
-        }
-      `;
-      await mondayQuery(updateQuery);
-    }
-    
-    await client.chat.postEphemeral({
-      channel: body.user.id,
-      user: userId,
-      text: '✅ Task updated successfully in Monday.com!'
-    });
-    
-    logger.success('Task updated via modal', { taskId, boardId, userId });
-    
-  } catch (error) {
-    logger.error('Error processing modal submission', error);
-  }
-});
-
 // Handle postpone task
 async function handlePostponeTask(taskId, boardId, userId, client, body) {
   try {
@@ -753,26 +619,149 @@ async function handleViewTask(taskId, boardId, userId, client, body) {
 }
 
 // ============================================
+// SLACK BUTTON INTERACTION HANDLERS
+// ============================================
+// CRITICAL: These MUST be registered at module level, BEFORE startServer()
+
+logger.info('🔧 Registering button interaction handlers...');
+
+// Handle button clicks for task actions
+slackApp.action(/^task_action_.*/, async ({ action, ack, body, client }) => {
+  // CRITICAL: Acknowledge immediately to prevent timeout
+  await ack();
+  
+  metrics.buttonClicks++;
+  
+  try {
+    const [_, actionType, taskId, boardId] = action.action_id.split('_');
+    const userId = body.user.id;
+    
+    logger.info(`Button clicked: ${actionType}`, { userId, taskId, boardId });
+    
+    switch (actionType) {
+      case 'complete':
+        await handleCompleteTask(taskId, boardId, userId, client, body);
+        break;
+      case 'update':
+        await handleUpdateTask(taskId, boardId, userId, client, body);
+        break;
+      case 'postpone':
+        await handlePostponeTask(taskId, boardId, userId, client, body);
+        break;
+      case 'view':
+        await handleViewTask(taskId, boardId, userId, client, body);
+        break;
+      default:
+        logger.warn(`Unknown action: ${actionType}`);
+    }
+  } catch (error) {
+    logger.error('Error handling button click', error);
+    try {
+      await client.chat.postEphemeral({
+        channel: body.channel?.id || body.user.id,
+        user: body.user.id,
+        text: `❌ Error: ${error.message}`
+      });
+    } catch (ephemeralError) {
+      logger.error('Failed to send error message', ephemeralError);
+    }
+  }
+});
+
+logger.info('✅ Button handler registered');
+
+// Handle modal submission
+slackApp.view(/^update_task_modal_.*/, async ({ ack, body, view, client }) => {
+  await ack();
+  
+  try {
+    const [_, __, ___, taskId, boardId] = view.callback_id.split('_');
+    const userId = body.user.id;
+    
+    const values = view.state.values;
+    const updates = [];
+    
+    const boardQuery = `
+      query {
+        boards(ids: [${boardId}]) {
+          columns {
+            id
+            type
+          }
+        }
+      }
+    `;
+    
+    const boardData = await mondayQuery(boardQuery);
+    const columns = boardData.boards[0].columns;
+    
+    if (values.status_block?.status_select?.selected_option) {
+      const [columnId, statusIndex] = values.status_block.status_select.selected_option.value.split(':');
+      updates.push({
+        columnId,
+        value: `{"index": ${statusIndex}}`
+      });
+    }
+    
+    if (values.date_block?.date_select?.selected_date) {
+      const dateColumn = columns.find(c => c.type === 'date');
+      if (dateColumn) {
+        updates.push({
+          columnId: dateColumn.id,
+          value: `{"date": "${values.date_block.date_select.selected_date}"}`
+        });
+      }
+    }
+    
+    const notes = values.notes_block?.notes_input?.value;
+    if (notes) {
+      const createUpdateQuery = `
+        mutation {
+          create_update(
+            item_id: ${taskId},
+            body: "${notes.replace(/"/g, '\\"')}"
+          ) {
+            id
+          }
+        }
+      `;
+      await mondayQuery(createUpdateQuery);
+    }
+    
+    for (const update of updates) {
+      const updateQuery = `
+        mutation {
+          change_column_value(
+            board_id: ${boardId},
+            item_id: ${taskId},
+            column_id: "${update.columnId}",
+            value: "${update.value.replace(/"/g, '\\"')}"
+          ) {
+            id
+          }
+        }
+      `;
+      await mondayQuery(updateQuery);
+    }
+    
+    await client.chat.postEphemeral({
+      channel: body.user.id,
+      user: userId,
+      text: '✅ Task updated successfully in Monday.com!'
+    });
+    
+    logger.success('Task updated via modal', { taskId, boardId, userId });
+    
+  } catch (error) {
+    logger.error('Error processing modal submission', error);
+  }
+});
+
+logger.info('✅ Modal handler registered');
+
+// ============================================
 // SERVER STARTUP AND ROUTES
 // ============================================
-
-async function startServer() {
-  try {
-    initializeSlackCommands(slackApp);
-    registerTasksCommand(slackApp);
-    
-    logger.info('✅ Button handlers registered');
-    logger.info('✅ Modal handlers registered');
-    
-    await slackApp.start(PORT);
-    logger.success(`⚡️ Server running on port ${PORT}`);
-    logger.success('✅ Commands: /create-task, /quick-task, /monday-help, /tasks');
-    logger.success('🔘 Interactive buttons enabled: Complete, Update, Postpone, View');
-  } catch (error) {
-    logger.error('❌ Failed to start', error);
-    process.exit(1);
-  }
-}
 
 receiver.app.post('/webhook/monday', async (req, res) => {
   metrics.webhooksReceived++;
@@ -792,7 +781,29 @@ receiver.app.post('/trigger', async (req, res) => {
 });
 
 receiver.app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime(), lastRun: metrics.lastRun, metrics }));
-receiver.app.get('/', (req, res) => res.json({ message: 'Monday → Slack Automation', version: '4.8.0', status: 'running', lastRun: metrics.lastRun, buttonsEnabled: true }));
+receiver.app.get('/', (req, res) => res.json({ message: 'Monday → Slack Automation', version: '4.8.1', status: 'running', lastRun: metrics.lastRun, buttonsEnabled: true }));
 receiver.app.get('/metrics', (req, res) => res.json({ ...metrics, uptime: process.uptime(), timestamp: new Date().toISOString() }));
 
-startServer();
+// Initialize and start server
+(async () => {
+  try {
+    logger.info('🚀 Initializing Slack app...');
+    
+    // Register slash commands
+    initializeSlackCommands(slackApp);
+    registerTasksCommand(slackApp);
+    
+    logger.info('✅ Slash commands registered');
+    
+    // Start the server
+    await slackApp.start(PORT);
+    
+    logger.success(`⚡️ Server running on port ${PORT}`);
+    logger.success('✅ Commands: /create-task, /quick-task, /monday-help, /tasks');
+    logger.success('🔘 Interactive buttons enabled: Complete, Update, Postpone, View');
+    logger.success('📡 Webhook endpoint: /webhook/monday');
+  } catch (error) {
+    logger.error('❌ Failed to start server', error);
+    process.exit(1);
+  }
+})();
