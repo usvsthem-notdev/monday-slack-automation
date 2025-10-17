@@ -423,146 +423,170 @@ function initializeSlackCommands(slackApp) {
     }
   });
   
-  // Main command: /create-task
-  slackApp.command('/create-task', async ({ command, ack, respond, client }) => {
-    await ack();
+  // FIXED: Main command: /create-task with ULTRA FAST ACK
+  slackApp.command('/create-task', ({ command, ack, respond, client }) => {
+    // CRITICAL: Acknowledge IMMEDIATELY - no await, just return the promise
+    const ackPromise = ack();
     
-    try {
-      logger.info('Create task command received', { 
-        userId: command.user_id,
-        text: command.text 
-      });
-      
-      // Open a modal for task creation
-      const boards = await getAllBoards();
-      const users = await getUsers();
-      
-      await client.views.open({
-        trigger_id: command.trigger_id,
-        view: {
-          type: 'modal',
-          callback_id: 'create_task_modal',
-          title: {
-            type: 'plain_text',
-            text: 'Create Monday.com Task'
-          },
-          submit: {
-            type: 'plain_text',
-            text: 'Create Task'
-          },
-          close: {
-            type: 'plain_text',
-            text: 'Cancel'
-          },
-          blocks: [
-            {
-              type: 'input',
-              block_id: 'task_name',
-              label: {
-                type: 'plain_text',
-                text: 'Task Name'
-              },
-              element: {
-                type: 'plain_text_input',
-                action_id: 'task_name_input',
-                placeholder: {
-                  type: 'plain_text',
-                  text: 'Enter task name...'
-                }
-              }
+    // Process everything asynchronously in the background
+    process.nextTick(async () => {
+      try {
+        logger.info('Create task command received', { 
+          userId: command.user_id,
+          text: command.text 
+        });
+        
+        // Show loading message first
+        await client.chat.postEphemeral({
+          channel: command.channel_id,
+          user: command.user_id,
+          text: '⏳ Loading task creation form...'
+        });
+        
+        // Now do the heavy API calls
+        const [boards, users] = await Promise.all([
+          getAllBoards(),
+          getUsers()
+        ]);
+        
+        // Open modal for task creation
+        await client.views.open({
+          trigger_id: command.trigger_id,
+          view: {
+            type: 'modal',
+            callback_id: 'create_task_modal',
+            title: {
+              type: 'plain_text',
+              text: 'Create Monday.com Task'
             },
-            {
-              type: 'input',
-              block_id: 'board_select',
-              label: {
-                type: 'plain_text',
-                text: 'Board'
-              },
-              element: {
-                type: 'static_select',
-                action_id: 'board_select_input',
-                placeholder: {
+            submit: {
+              type: 'plain_text',
+              text: 'Create Task'
+            },
+            close: {
+              type: 'plain_text',
+              text: 'Cancel'
+            },
+            blocks: [
+              {
+                type: 'input',
+                block_id: 'task_name',
+                label: {
                   type: 'plain_text',
-                  text: 'Select a board'
+                  text: 'Task Name'
                 },
-                options: boards.slice(0, 100).map(board => ({
-                  text: {
+                element: {
+                  type: 'plain_text_input',
+                  action_id: 'task_name_input',
+                  placeholder: {
                     type: 'plain_text',
-                    text: `${board.name} (${board.workspace?.name || 'No workspace'})`
-                  },
-                  value: board.id
-                }))
-              }
-            },
-            {
-              type: 'input',
-              block_id: 'assignees',
-              optional: true,
-              label: {
-                type: 'plain_text',
-                text: 'Assign To'
+                    text: 'Enter task name...'
+                  }
+                }
               },
-              element: {
-                type: 'multi_static_select',
-                action_id: 'assignees_input',
-                placeholder: {
+              {
+                type: 'input',
+                block_id: 'board_select',
+                label: {
                   type: 'plain_text',
-                  text: 'Select team members'
+                  text: 'Board'
                 },
-                options: users.slice(0, 100).map(user => ({
-                  text: {
+                element: {
+                  type: 'static_select',
+                  action_id: 'board_select_input',
+                  placeholder: {
                     type: 'plain_text',
-                    text: user.name
+                    text: 'Select a board'
                   },
-                  value: user.id
-                }))
-              }
-            },
-            {
-              type: 'input',
-              block_id: 'due_date',
-              optional: true,
-              label: {
-                type: 'plain_text',
-                text: 'Due Date'
+                  options: boards.slice(0, 100).map(board => ({
+                    text: {
+                      type: 'plain_text',
+                      text: `${board.name} (${board.workspace?.name || 'No workspace'})`
+                    },
+                    value: board.id
+                  }))
+                }
               },
-              element: {
-                type: 'datepicker',
-                action_id: 'due_date_input',
-                placeholder: {
+              {
+                type: 'input',
+                block_id: 'assignees',
+                optional: true,
+                label: {
                   type: 'plain_text',
-                  text: 'Select a date'
+                  text: 'Assign To'
+                },
+                element: {
+                  type: 'multi_static_select',
+                  action_id: 'assignees_input',
+                  placeholder: {
+                    type: 'plain_text',
+                    text: 'Select team members'
+                  },
+                  options: users.slice(0, 100).map(user => ({
+                    text: {
+                      type: 'plain_text',
+                      text: user.name
+                    },
+                    value: user.id
+                  }))
+                }
+              },
+              {
+                type: 'input',
+                block_id: 'due_date',
+                optional: true,
+                label: {
+                  type: 'plain_text',
+                  text: 'Due Date'
+                },
+                element: {
+                  type: 'datepicker',
+                  action_id: 'due_date_input',
+                  placeholder: {
+                    type: 'plain_text',
+                    text: 'Select a date'
+                  }
+                }
+              },
+              {
+                type: 'input',
+                block_id: 'status',
+                optional: true,
+                label: {
+                  type: 'plain_text',
+                  text: 'Status (optional)'
+                },
+                element: {
+                  type: 'plain_text_input',
+                  action_id: 'status_input',
+                  placeholder: {
+                    type: 'plain_text',
+                    text: 'e.g., Working on it, Stuck, Done'
+                  }
                 }
               }
-            },
-            {
-              type: 'input',
-              block_id: 'status',
-              optional: true,
-              label: {
-                type: 'plain_text',
-                text: 'Status (optional)'
-              },
-              element: {
-                type: 'plain_text_input',
-                action_id: 'status_input',
-                placeholder: {
-                  type: 'plain_text',
-                  text: 'e.g., Working on it, Stuck, Done'
-                }
-              }
-            }
-          ]
+            ]
+          }
+        });
+        
+      } catch (error) {
+        logger.error('Error opening create task modal', error);
+        
+        // Send error message to user
+        try {
+          await client.chat.postEphemeral({
+            channel: command.channel_id,
+            user: command.user_id,
+            text: '❌ Sorry, there was an error opening the task creation form. Please try again.'
+          });
+        } catch (notifyError) {
+          logger.error('Failed to send error notification', notifyError);
         }
-      });
-      
-    } catch (error) {
-      logger.error('Error opening create task modal', error);
-      await respond({
-        text: '❌ Sorry, there was an error opening the task creation form. Please try again.',
-        response_type: 'ephemeral'
-      });
-    }
+      }
+    });
+    
+    // Return the ack promise immediately
+    return ackPromise;
   });
   
   // Handle modal submission
@@ -638,86 +662,92 @@ function initializeSlackCommands(slackApp) {
     }
   });
   
-  // Quick create command with inline syntax: /quick-task [task name] @[user] [board]
-  slackApp.command('/quick-task', async ({ command, ack, respond }) => {
-    await ack();
+  // FIXED: Quick create command - also using ultra fast ack
+  slackApp.command('/quick-task', ({ command, ack, respond }) => {
+    // CRITICAL: Acknowledge IMMEDIATELY
+    const ackPromise = ack();
     
-    try {
-      const text = command.text.trim();
-      
-      if (!text) {
+    // Process asynchronously
+    process.nextTick(async () => {
+      try {
+        const text = command.text.trim();
+        
+        if (!text) {
+          await respond({
+            text: '💡 *Usage:* `/quick-task Task name @user board-name`\n\nExample: `/quick-task Review design doc @john sales-board`',
+            response_type: 'ephemeral'
+          });
+          return;
+        }
+        
+        // Parse the command (basic parsing)
+        const parts = text.split(' ');
+        const taskName = parts.filter(p => !p.startsWith('@')).join(' ');
+        
+        if (!taskName) {
+          await respond({
+            text: '❌ Please provide a task name.\n\nExample: `/quick-task Review design doc`',
+            response_type: 'ephemeral'
+          });
+          return;
+        }
+        
         await respond({
-          text: '💡 *Usage:* `/quick-task Task name @user board-name`\n\nExample: `/quick-task Review design doc @john sales-board`',
+          text: `🔄 Creating task: "${taskName}"...`,
           response_type: 'ephemeral'
         });
-        return;
-      }
-      
-      // Parse the command (basic parsing)
-      const parts = text.split(' ');
-      const taskName = parts.filter(p => !p.startsWith('@')).join(' ');
-      
-      if (!taskName) {
+        
+        // For quick tasks, use a default board or the first available board
+        const boards = await getAllBoards();
+        if (boards.length === 0) {
+          await respond({
+            text: '❌ No boards found. Please create a board on Monday.com first.',
+            response_type: 'ephemeral'
+          });
+          return;
+        }
+        
+        const defaultBoard = boards[0];
+        const createdTask = await createMondayTask(defaultBoard.id, taskName, [], null, null);
+        
         await respond({
-          text: '❌ Please provide a task name.\n\nExample: `/quick-task Review design doc`',
-          response_type: 'ephemeral'
-        });
-        return;
-      }
-      
-      await respond({
-        text: `🔄 Creating task: "${taskName}"...`,
-        response_type: 'ephemeral'
-      });
-      
-      // For quick tasks, use a default board or the first available board
-      const boards = await getAllBoards();
-      if (boards.length === 0) {
-        await respond({
-          text: '❌ No boards found. Please create a board on Monday.com first.',
-          response_type: 'ephemeral'
-        });
-        return;
-      }
-      
-      const defaultBoard = boards[0];
-      const createdTask = await createMondayTask(defaultBoard.id, taskName, [], null, null);
-      
-      await respond({
-        text: `✅ Task created: "${createdTask.name}" on ${createdTask.board.name}`,
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: `✅ *Task Created!*\n\n*${createdTask.name}*\n📍 ${createdTask.board.name}`
-            }
-          },
-          {
-            type: 'actions',
-            elements: [
-              {
-                type: 'button',
-                text: {
-                  type: 'plain_text',
-                  text: '📱 View on Monday.com'
-                },
-                url: `https://drexcorp-company.monday.com/boards/${createdTask.board.id}/pulses/${createdTask.id}`,
-                style: 'primary'
+          text: `✅ Task created: "${createdTask.name}" on ${createdTask.board.name}`,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `✅ *Task Created!*\n\n*${createdTask.name}*\n📍 ${createdTask.board.name}`
               }
-            ]
-          }
-        ],
-        response_type: 'ephemeral'
-      });
-      
-    } catch (error) {
-      logger.error('Error in quick task command', error);
-      await respond({
-        text: '❌ Sorry, there was an error creating the task. Please try again.',
-        response_type: 'ephemeral'
-      });
-    }
+            },
+            {
+              type: 'actions',
+              elements: [
+                {
+                  type: 'button',
+                  text: {
+                    type: 'plain_text',
+                    text: '📱 View on Monday.com'
+                  },
+                  url: `https://drexcorp-company.monday.com/boards/${createdTask.board.id}/pulses/${createdTask.id}`,
+                  style: 'primary'
+                }
+              ]
+            }
+          ],
+          response_type: 'ephemeral'
+        });
+        
+      } catch (error) {
+        logger.error('Error in quick task command', error);
+        await respond({
+          text: '❌ Sorry, there was an error creating the task. Please try again.',
+          response_type: 'ephemeral'
+        });
+      }
+    });
+    
+    return ackPromise;
   });
   
   // Help command
