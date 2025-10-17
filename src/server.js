@@ -3,6 +3,10 @@ const { App, ExpressReceiver } = require('@slack/bolt');
 const axios = require('axios');
 const { handleWebhook } = require('./webhookHandler');
 
+// Import missing command modules
+const { initializeSlackCommands } = require('./slackCommands');
+const { registerTasksCommand } = require('./tasksCommand');
+
 // Configuration
 const MONDAY_API_KEY = process.env.MONDAY_API_KEY;
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
@@ -23,6 +27,11 @@ const app = new App({
   token: SLACK_BOT_TOKEN,
   receiver
 });
+
+// Initialize all Slack commands
+initializeSlackCommands(app);
+registerTasksCommand(app);
+console.log('✅ All Slack commands initialized');
 
 // Monday.com API helper
 const mondayAxios = axios.create({
@@ -140,7 +149,7 @@ async function handleCompleteTask(taskId, boardId, userId, client, body) {
           board_id: ${boardId},
           item_id: ${taskId},
           column_id: "${statusColumn.id}",
-          value: "{\\"index\\": ${doneIndex}}"
+          value: "{\\\"index\\\": ${doneIndex}}"
         ) {
           id
         }
@@ -158,7 +167,7 @@ async function handleCompleteTask(taskId, boardId, userId, client, body) {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: '✅ *Task completed!*\nYour task has been marked as "Done" in Monday.com.'
+            text: '✅ *Task completed!*\\nYour task has been marked as "Done" in Monday.com.'
           }
         }
       ]
@@ -450,7 +459,7 @@ async function handlePostponeTask(taskId, boardId, userId, client, body) {
           board_id: ${boardId},
           item_id: ${taskId},
           column_id: "${dateColumnValue.id}",
-          value: "{\\"date\\": \\"${newDateStr}\\"}"
+          value: "{\\\"date\\\": \\\"${newDateStr}\\\"}"
         ) {
           id
         }
@@ -520,11 +529,11 @@ async function handleViewTask(taskId, boardId, userId, client, body) {
         fields: [
           {
             type: 'mrkdwn',
-            text: `*Created:*\n${new Date(task.created_at).toLocaleDateString()}`
+            text: `*Created:*\\n${new Date(task.created_at).toLocaleDateString()}`
           },
           {
             type: 'mrkdwn',
-            text: `*Creator:*\n${task.creator?.name || 'Unknown'}`
+            text: `*Creator:*\\n${task.creator?.name || 'Unknown'}`
           }
         ]
       },
@@ -562,7 +571,7 @@ async function handleViewTask(taskId, boardId, userId, client, body) {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `*${update.creator?.name}* - ${new Date(update.created_at).toLocaleDateString()}\n${update.body}`
+            text: `*${update.creator?.name}* - ${new Date(update.created_at).toLocaleDateString()}\\n${update.body}`
           }
         });
       });
@@ -602,21 +611,8 @@ function refreshTaskList(userId, client) {
 
 // ============================================
 // SLACK SLASH COMMANDS
+// Note: Additional commands are now imported from slackCommands.js and tasksCommand.js
 // ============================================
-
-app.command('/tasks', async ({ command, ack, client }) => {
-  await ack();
-  
-  try {
-    await client.chat.postEphemeral({
-      channel: command.channel_id,
-      user: command.user_id,
-      text: '🔄 Fetching your tasks from Monday.com...'
-    });
-  } catch (error) {
-    console.error('Error handling /tasks command:', error);
-  }
-});
 
 app.command('/task-complete', async ({ command, ack, client }) => {
   await ack();
@@ -651,12 +647,19 @@ receiver.app.get('/', (req, res) => {
   res.json({ 
     message: 'Monday.com → Slack Automation Server',
     status: 'running',
-    version: '4.9.1-ultra-fast-ack',
+    version: '4.9.2-fixed-commands',
     endpoints: {
       health: '/health',
       slack_events: '/slack/events',
       monday_webhook: '/webhook/monday'
-    }
+    },
+    commands: [
+      '/tasks',
+      '/create-task', 
+      '/quick-task',
+      '/monday-help',
+      '/task-complete'
+    ]
   });
 });
 
@@ -668,7 +671,8 @@ receiver.app.get('/', (req, res) => {
     console.log(`🌐 Listening on 0.0.0.0:${PORT}`);
     console.log(`📡 Slack events: /slack/events`);
     console.log(`🔔 Monday webhook: /webhook/monday`);
-    console.log(`✅ Server started successfully - v4.9.1`);
+    console.log(`✅ Server started successfully - v4.9.2-fixed-commands`);
+    console.log(`🎯 Available commands: /tasks, /create-task, /quick-task, /monday-help, /task-complete`);
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
