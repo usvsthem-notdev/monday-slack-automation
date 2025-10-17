@@ -1,12 +1,13 @@
 {
   "name": "monday-slack-automation",
-  "version": "4.0.0",
-  "description": "Optimized Monday.com task sync to Slack with caching, monitoring, and error handling",
-  "main": "src/automation.js",
+  "version": "5.0.0",
+  "description": "Monday.com to Slack automation with interactive commands, webhooks, and real-time task management",
+  "main": "src/server.js",
   "scripts": {
-    "start": "node src/automation.js",
-    "dev": "NODE_ENV=development node src/automation.js",
-    "test": "node tests/automation.test.js"
+    "start": "node src/server.js",
+    "dev": "NODE_ENV=development node src/server.js",
+    "test": "node tests/automation.test.js",
+    "legacy": "node src/automation.js"
   },
   "dependencies": {
     "@slack/web-api": "^7.0.4",
@@ -22,11 +23,11 @@
     "monday.com",
     "slack",
     "automation",
-    "scheduled-tasks",
+    "slack-commands",
     "webhook",
-    "caching",
-    "monitoring",
-    "performance"
+    "interactive-components",
+    "task-management",
+    "real-time"
   ],
   "author": "Connor Drexler",
   "license": "MIT",
