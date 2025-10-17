@@ -7,7 +7,7 @@
     "start": "node src/server.js",
     "dev": "NODE_ENV=development node src/server.js",
     "test": "node tests/automation.test.js",
-    "legacy": "node src/automation.js"
+    "legacy": "node legacy/automation.js"
   },
   "dependencies": {
     "@slack/web-api": "^7.0.4",
