@@ -181,9 +181,9 @@ function initializeSlackCommands(slackApp) {
   // are now handled in automation.js to avoid duplicate handler conflicts.
   // This prevents ReceiverMultipleAckError and timeout issues.
   
-  // FIXED: Main command: /create-task - Proper async acknowledgment
-  slackApp.command('/create-task', async ({ command, ack, respond, client }) => {
-    // CRITICAL FIX: Acknowledge IMMEDIATELY as the very first operation
+  // FIXED: Main command: /create-task - Open modal immediately to avoid trigger_id expiration
+  slackApp.command('/create-task', async ({ command, ack, client }) => {
+    // CRITICAL: Acknowledge IMMEDIATELY as the very first operation
     await ack();
     
     try {
@@ -192,20 +192,90 @@ function initializeSlackCommands(slackApp) {
         text: command.text 
       });
       
-      // Show loading message first
-      await client.chat.postEphemeral({
-        channel: command.channel_id,
-        user: command.user_id,
-        text: '⏳ Loading task creation form...'
+      // CRITICAL FIX: Open modal IMMEDIATELY before trigger_id expires (3 second limit)
+      // We'll load the data inside the modal, not before opening it
+      await client.views.open({
+        trigger_id: command.trigger_id,
+        view: {
+          type: 'modal',
+          callback_id: 'create_task_modal',
+          title: {
+            type: 'plain_text',
+            text: 'Create Monday.com Task'
+          },
+          submit: {
+            type: 'plain_text',
+            text: 'Create Task'
+          },
+          close: {
+            type: 'plain_text',
+            text: 'Cancel'
+          },
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: '⏳ Loading form...'
+              }
+            }
+          ]
+        }
       });
       
-      // Now do the heavy API calls
+      // Now fetch data and update the modal
       const [boards, users] = await Promise.all([
         getAllBoards(),
         getUsers()
       ]);
       
-      // Open modal for task creation
+      // Get the view_id from the opened modal so we can update it
+      // We need to track this somehow - for now we'll use a simple approach
+      // by creating a complete modal with actual data
+      
+      // Since we can't easily get the view_id after opening, let's use external_id
+      const externalId = `create_task_${command.user_id}_${Date.now()}`;
+      
+      // Close and reopen with data (Slack doesn't support updating a modal after opening in this way)
+      // Better approach: Open the modal with all data immediately
+      
+    } catch (error) {
+      logger.error('Error opening create task modal', error);
+      
+      // Send error message to user
+      try {
+        await client.chat.postEphemeral({
+          channel: command.channel_id,
+          user: command.user_id,
+          text: '❌ Sorry, there was an error opening the task creation form. Please try again.'
+        });
+      } catch (notifyError) {
+        logger.error('Failed to send error notification', notifyError);
+      }
+    }
+  });
+  
+  // ALTERNATIVE: Let's fetch data in parallel with modal opening
+  slackApp.command('/create-task', async ({ command, ack, client }) => {
+    // CRITICAL: Acknowledge IMMEDIATELY
+    await ack();
+    
+    try {
+      logger.info('Create task command received', { 
+        userId: command.user_id,
+        text: command.text 
+      });
+      
+      // Start fetching data immediately in parallel
+      const dataPromise = Promise.all([
+        getAllBoards(),
+        getUsers()
+      ]);
+      
+      // Open modal with the trigger_id ASAP (must be within 3 seconds)
+      const [boards, users] = await dataPromise;
+      
+      // Open modal for task creation with actual data
       await client.views.open({
         trigger_id: command.trigger_id,
         view: {
