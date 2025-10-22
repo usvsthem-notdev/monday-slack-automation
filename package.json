@@ -1,13 +1,14 @@
 {
   "name": "monday-slack-automation",
-  "version": "5.0.0",
-  "description": "Monday.com to Slack automation with interactive commands, webhooks, and real-time task management",
-  "main": "src/server.js",
+  "version": "6.0.0",
+  "description": "Unified Monday.com to Slack automation with async processing, interactive commands, webhooks, and real-time task management",
+  "main": "src/unified-server.js",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "NODE_ENV=development node src/server.js",
+    "start": "node src/unified-server.js",
+    "dev": "NODE_ENV=development node src/unified-server.js",
     "test": "node tests/automation.test.js",
-    "legacy": "node legacy/automation.js"
+    "legacy-server": "node src/server.js",
+    "legacy-automation": "node src/automation.js"
   },
   "dependencies": {
     "@slack/web-api": "^7.0.4",
@@ -27,7 +28,10 @@
     "webhook",
     "interactive-components",
     "task-management",
-    "real-time"
+    "real-time",
+    "async-processing",
+    "background-jobs",
+    "unified-server"
   ],
   "author": "Connor Drexler",
   "license": "MIT",

@@ -1,34 +1,138 @@
-# Monday.com → Slack Automation
+# Monday.com ↔ Slack Unified Automation
 
-⚡️ **Modern Slack automation with interactive commands, real-time webhooks, and seamless task management**
+⚡️ **Production-ready Slack automation with async processing, real-time webhooks, and comprehensive task management**
 
-## 🌟 Features
+## 🌟 Version 6.0 - Unified Architecture
+
+### ✨ What's New in v6.0
+
+- 🚀 **Asynchronous Request Processing** - All Slack commands respond instantly
+- 🔄 **Background Job Queue** - Heavy operations processed without blocking
+- 🎯 **Unified Codebase** - All services consolidated into one server
+- 📊 **Enhanced Monitoring** - Real-time queue stats and metrics
+- ⚡ **No More Timeouts** - Guaranteed fast responses to Slack
+- 🛠️ **Easier Maintenance** - Single deployment, consistent logging
+
+## 🌟 Core Features
 
 ### 🤖 **Interactive Slack Commands**
+
+All commands respond **instantly** with background processing:
+
 - `/create-task` - Full-featured task creation with assignees, due dates, and status
 - `/quick-task` - Rapidly create tasks with minimal details
 - `/tasks` - View your current tasks organized by priority
 - `/monday-help` - Get help with available commands
 - `/task-complete` - Mark tasks as complete
-- **Ultra-fast response** - All commands respond within 3 seconds
+- **Ultra-fast response** - All commands acknowledge within milliseconds
 
 ### 🔔 **Real-Time Task Notifications**
+
 - **Instant Slack notifications** when users are assigned to tasks
 - Smart detection of newly assigned users (won't spam existing assignees)
 - Rich notifications with task details, due dates, and status
 - Interactive action buttons: Mark Complete, Update Task, Postpone, View Details
 
 ### ✨ **Interactive Components**
+
 - **One-click task actions** directly from Slack messages
 - Mark tasks complete without leaving Slack
 - Postpone due dates with a single click
 - Update task status, dates, and add notes via modals
 - View detailed task information inline
 
-### 📊 **Daily Task Management**
-- Automated daily task summaries (optional)
+### 📊 **Daily Task Automation**
+
+- Automated daily task summaries (trigger via API endpoint)
 - Tasks organized by priority: Overdue, Due Today, Upcoming This Week
 - Updates existing messages instead of creating spam
+- Configurable workspace filtering
+
+### 🔄 **Background Processing**
+
+- **Async Job Queue** - Process requests in the background
+- **Immediate Feedback** - Users see "Processing..." instantly
+- **No Blocking** - Server never waits for long operations
+- **Queue Monitoring** - Track queue length and processing status
+
+## 🏗️ Architecture (v6.0.0)
+
+```
+┌─────────────────────┐
+│   Slack Workspace   │
+│                     │
+│  /create-task  ────┐│
+│  /quick-task   ────┤│
+│  /tasks        ────┤│   Instant ACK
+│  /monday-help  ────┤│   (< 1ms)
+│  /task-complete────┤│     │
+│                    ││     │
+│  Interactive   ────┤│     │
+│  Components    ────┘│     │
+└──────────┬──────────┘     │
+           │                │
+           ↓ HTTPS          ↓
+┌──────────────────────────────────┐
+│    Unified Server (v6.0)         │
+│  ┌────────────────────────────┐  │
+│  │   Express Receiver         │←─┤
+│  │   + Slack Bolt App         │  │
+│  └─────────┬──────────────────┘  │
+│            │                      │
+│  ┌─────────▼──────────────────┐  │
+│  │   Async Job Queue          │  │
+│  │  ┌──────────────────────┐  │  │
+│  │  │ Button Actions       │  │  │
+│  │  │ Modal Submissions    │  │  │
+│  │  │ Daily Automation     │  │  │
+│  │  │ Heavy Operations     │  │  │
+│  │  └──────────────────────┘  │  │
+│  └────────────────────────────┘  │
+│                                   │
+│  Features:                        │
+│  • Slack Commands                 │
+│  • Interactive Components         │
+│  • Webhook Handler                │
+│  • Daily Task Automation          │
+│  • Background Processing          │
+└───────┬───────────┬───────────────┘
+        │           │
+        ↓           ↓
+  ┌─────────┐ ┌──────────┐
+  │ Monday  │ │  Slack   │
+  │   API   │ │   API    │
+  └─────────┘ └──────────┘
+       ↑
+       │ Webhooks
+       └─────────┘
+```
+
+### Request Flow: Async Processing
+
+```
+User types /tasks in Slack
+        │
+        ↓
+Slack sends request
+        │
+        ↓
+Server ACKs immediately (< 1ms)
+        │
+        ├─→ Return "Processing..." to user
+        │
+        └─→ Add task to queue
+                │
+                ↓
+        Queue processes in background
+                │
+                ├─→ Fetch boards from Monday.com
+                ├─→ Get user tasks
+                ├─→ Organize by priority
+                └─→ Send formatted message
+                        │
+                        ↓
+                User sees complete task list
+```
 
 ## 🚀 Quick Start
 
@@ -63,6 +167,7 @@
    SLACK_BOT_TOKEN=xoxb-your-slack-bot-token
    SLACK_SIGNING_SECRET=your_slack_signing_secret
    PORT=3000
+   TEST_MODE=false  # Set to true for single-user testing
    ```
 
 4. **Run locally**
@@ -134,6 +239,7 @@
    - `SLACK_BOT_TOKEN`
    - `SLACK_SIGNING_SECRET`
    - `PORT` (Render will auto-assign, but you can set 3000)
+   - `TEST_MODE` (false for production)
 
 4. **Deploy**
    - Click "Create Web Service"
@@ -144,13 +250,48 @@
    - Update all slash command URLs to point to your Render URL
    - Test each command to ensure they work
 
+6. **Set Up Daily Automation** (Optional)
+   - In Render, add a Cron Job
+   - Schedule: `0 9 * * *` (9 AM daily)
+   - Command: `curl -X POST https://your-app.onrender.com/trigger`
+
+## 📡 API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Service info and status |
+| `/health` | GET | Health check + queue status |
+| `/metrics` | GET | Detailed metrics + queue stats |
+| `/slack/events` | POST | Slack events and commands |
+| `/webhook/monday` | POST | Monday.com webhook endpoint |
+| `/trigger` | POST | Trigger daily automation |
+
+### Queue Status Monitoring
+
+```bash
+# Check health and queue status
+curl https://your-server.com/health
+
+# Response includes:
+{
+  "status": "ok",
+  "queueLength": 0,
+  "queueProcessing": false,
+  "metrics": {
+    "commandsProcessed": 150,
+    "asyncTasksQueued": 45,
+    "webhooksReceived": 23
+  }
+}
+```
+
 ## 🧪 Testing
 
 ### Manual Testing
 
 **Test Slack Commands**:
 - Try `/create-task` in any Slack channel
-- Should respond with loading message then open modal
+- Should respond with "Processing..." then open modal
 
 **Test Health Endpoint**:
 ```bash
@@ -164,83 +305,10 @@ curl -X POST https://your-server.com/webhook/monday \
   -d '{"challenge":"test_challenge"}'
 ```
 
-## 📡 API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Service status and info |
-| `/health` | GET | Health check |
-| `/slack/events` | POST | Slack events and commands |
-| `/webhook/monday` | POST | Monday.com webhook endpoint |
-
-## 🏗️ Architecture (v5.0.0)
-
+**Test Daily Automation**:
+```bash
+curl -X POST https://your-server.com/trigger
 ```
-┌─────────────────────┐
-│   Slack Workspace   │
-│                     │
-│  /create-task  ────┐│
-│  /quick-task   ────┤│
-│  /tasks        ────┤│
-│  /monday-help  ────┤│
-│  /task-complete────┤│
-│                    ││
-│  Interactive   ────┤│
-│  Components    ────┘│
-└─────────────────────┘
-         │
-         ↓ HTTPS
-┌─────────────────────────────┐
-│     Render Web Service      │
-│                             │
-│  ┌───────────────────────┐ │
-│  │   src/server.js       │ │
-│  │   (Main Slack App)    │ │
-│  │                       │ │
-│  │  ├─ Commands Handler  │ │
-│  │  ├─ Interactive Comps │ │
-│  │  ├─ Webhook Handler   │ │
-│  │  └─ Express Receiver  │ │
-│  └───────────────────────┘ │
-│                             │
-│  ┌───────────────────────┐ │
-│  │   Module Imports:     │ │
-│  │  ├─ slackCommands.js  │ │
-│  │  ├─ tasksCommand.js   │ │
-│  │  └─ webhookHandler.js │ │
-│  └───────────────────────┘ │
-└─────────┬─────────┬─────────┘
-          │         │
-          ↓         ↓
-    ┌─────────┐ ┌──────────┐
-    │ Monday  │ │  Slack   │
-    │   API   │ │   API    │
-    └─────────┘ └──────────┘
-         ↑
-         │ Webhooks
-         └─────────┘
-```
-
-### Component Flow
-
-**Slash Commands**:
-1. User types `/create-task` in Slack
-2. Slack sends request to `/slack/events`
-3. Server acknowledges immediately (< 1ms)
-4. Background processing fetches boards/users
-5. Modal opens with task creation form
-
-**Real-Time Notifications**:
-1. User assigned to task in Monday.com
-2. Monday.com sends webhook to `/webhook/monday`
-3. Server processes event and sends notification
-4. User receives Slack message with action buttons
-
-**Interactive Actions**:
-1. User clicks "Mark Complete" button
-2. Server processes action in background
-3. Task updated in Monday.com
-4. User receives confirmation
 
 ## ⚙️ Configuration
 
@@ -252,10 +320,11 @@ curl -X POST https://your-server.com/webhook/monday \
 | `SLACK_BOT_TOKEN` | Yes | Slack bot token (xoxb-...) |
 | `SLACK_SIGNING_SECRET` | Yes | Slack signing secret |
 | `PORT` | No | Server port (default: 3000) |
+| `TEST_MODE` | No | Enable single-user testing (default: false) |
 
 ### Customization
 
-**Modify workspaces** (in `src/tasksCommand.js`):
+**Modify workspaces** (in `src/unified-server.js`):
 ```javascript
 const workspaceIds = [12742680, 12691809, 12666498];
 ```
@@ -272,8 +341,12 @@ function formatTaskNotification(task, assignedUserName) {
 ### Common Issues
 
 **Issue**: Commands timing out
-- **Solution**: Ensure all commands use ultra-fast ACK pattern
-- **Check**: Server logs for timeout errors
+- **Solution**: Check queue status at `/health` endpoint
+- **Check**: Server logs for queue processing
+
+**Issue**: Queue backing up
+- **Solution**: Monitor queue length in metrics
+- **Check**: If queue length > 10, investigate slow operations
 
 **Issue**: Modal not opening
 - **Solution**: Verify `trigger_id` is valid and used within 3 seconds
@@ -287,27 +360,46 @@ function formatTaskNotification(task, assignedUserName) {
 - **Solution**: Ensure user's Monday.com email matches Slack email
 - **Check**: Server logs for "Slack user not found" errors
 
-### Debug Commands
+**Issue**: Daily automation not running
+- **Solution**: Manually trigger via `/trigger` endpoint
+- **Check**: Verify cron job is configured correctly
 
-**Check server status**:
-```bash
-curl https://your-server.com/
+## 📊 Monitoring
+
+### Key Metrics
+
+```javascript
+{
+  "commandsProcessed": 0,      // Slack commands received
+  "asyncTasksQueued": 0,        // Tasks added to background queue
+  "webhooksReceived": 0,        // Webhooks from Monday.com
+  "notificationsSent": 0,       // Notifications sent to Slack
+  "messagesUpdated": 0,         // Daily messages updated
+  "messagesSent": 0,            // Daily messages sent
+  "usersProcessed": 0,          // Users processed in daily automation
+  "tasksFound": 0,              // Tasks found across all boards
+  "errors": 0,                  // Total errors encountered
+  "queueLength": 0,             // Current queue length
+  "queueProcessing": false      // Is queue currently processing
+}
 ```
 
-**Test webhook manually**:
+### Health Checks
+
 ```bash
-curl -X POST https://your-server.com/webhook/monday \
-  -H "Content-Type: application/json" \
-  -d '{"challenge":"test_challenge"}'
+# Basic health check
+curl https://your-server.com/health
+
+# Detailed metrics
+curl https://your-server.com/metrics
+
+# Check queue status
+curl https://your-server.com/metrics | jq '.queueStats'
 ```
 
-## 📊 Migration from v4.x.x
+## 📚 Migration from Previous Versions
 
-If upgrading from an older version, see [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for:
-- Architecture changes
-- Breaking changes
-- Migration steps
-- Legacy code handling
+See [UNIFIED_MIGRATION_GUIDE.md](UNIFIED_MIGRATION_GUIDE.md) for detailed migration instructions from v5.x to v6.0.
 
 ## 🛡️ Security
 
@@ -317,41 +409,45 @@ If upgrading from an older version, see [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md)
 - Monday.com webhook challenge verification
 - No sensitive data in logs
 - Ultra-fast ACK patterns prevent timeout attacks
+- Background queue protects against resource exhaustion
 
 ## 📚 File Structure
 
 ```
 monday-slack-automation/
 ├── src/
-│   ├── server.js           # Main Slack app (ACTIVE)
-│   ├── slackCommands.js    # Command definitions
-│   ├── tasksCommand.js     # Tasks command logic
-│   ├── webhookHandler.js   # Webhook processing
-│   └── messageFormatter.js # Message formatting
-├── legacy/
-│   ├── automation.js       # Old automation app (ARCHIVED)
-│   └── README.md          # Legacy code explanation
-├── docs/                   # Documentation
-├── tests/                  # Test files
-├── package.json           # Points to src/server.js
-├── MIGRATION_GUIDE.md     # v5.0.0 migration guide
-└── README.md              # This file
+│   ├── unified-server.js      # Main server (ACTIVE - v6.0)
+│   ├── slackCommands.js       # Command definitions
+│   ├── tasksCommand.js        # Tasks command logic
+│   ├── webhookHandler.js      # Webhook processing
+│   ├── messageFormatter.js    # Message formatting
+│   ├── server.js              # Legacy Slack commands (deprecated)
+│   └── automation.js          # Legacy daily tasks (deprecated)
+├── legacy/                     # Archived old code
+├── docs/                       # Documentation
+├── tests/                      # Test files
+├── package.json               # Points to unified-server.js
+├── UNIFIED_MIGRATION_GUIDE.md # v6.0 migration guide
+└── README.md                  # This file
 ```
 
 ## 🚀 Available Scripts
 
 ```bash
-# Start main server (recommended)
+# Start unified server (recommended)
 npm start
 
-# Development mode
+# Development mode with auto-reload
 npm run dev
-
-# Run legacy automation (not recommended)
-npm run legacy
 
 # Run tests
 npm test
+
+# Run legacy Slack commands server (deprecated)
+npm run legacy-server
+
+# Run legacy daily automation (deprecated)
+npm run legacy-automation
 ```
 
 ## 🤝 Contributing
@@ -384,6 +480,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-**Version**: 5.0.0  
-**Last Updated**: October 17, 2025  
-**Status**: ✅ Production Ready - Clean Architecture
+**Version**: 6.0.0-unified  
+**Last Updated**: October 22, 2025  
+**Status**: ✅ Production Ready - Unified Architecture with Async Processing
