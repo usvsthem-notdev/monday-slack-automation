@@ -84,6 +84,7 @@ async function getUserTasksFromBoard(board, userId) {
       return [];
     }
     
+    // FIXED: Removed 'title' field from column_values - it doesn't exist on ColumnValue type
     const query = `
       query {
         boards(ids: [${board.id}]) {
@@ -343,6 +344,7 @@ async function getMondayUserBySlackUser(slackUserId, slackClient) {
 // Register /tasks command
 function registerTasksCommand(slackApp) {
   slackApp.command('/tasks', async ({ command, ack, respond, client }) => {
+    // FIXED: Acknowledge immediately as the very first line
     await ack();
     
     try {

@@ -295,6 +295,12 @@ function extractNewlyAssignedUsers(event) {
 // Main webhook handler
 async function handleWebhook(req, res) {
   try {
+    // FIXED: Add null/undefined checks for req.body
+    if (!req || !req.body) {
+      logger.error('Webhook received with no body');
+      return res.status(400).json({ error: 'No request body' });
+    }
+
     const { challenge, event } = req.body;
     
     // Handle Monday.com webhook challenge verification
@@ -327,7 +333,10 @@ async function handleWebhook(req, res) {
     
   } catch (error) {
     logger.error('Webhook handler error', error);
-    res.status(500).json({ error: 'Internal server error' });
+    // Make sure we send a response even if there's an error
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal server error' });
+    }
   }
 }
 
