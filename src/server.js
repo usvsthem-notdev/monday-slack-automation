@@ -167,7 +167,7 @@ async function handleCompleteTask(taskId, boardId, userId, client, body) {
           board_id: ${boardId},
           item_id: ${taskId},
           column_id: "${statusColumn.id}",
-          value: "{\\"index\\": ${doneIndex}}"
+          value: "{\\\"index\\\": ${doneIndex}}"
         ) {
           id
         }
@@ -490,7 +490,7 @@ async function handlePostponeTask(taskId, boardId, userId, client, body) {
           board_id: ${boardId},
           item_id: ${taskId},
           column_id: "${dateColumnValue.id}",
-          value: "{\\"date\\": \\"${newDateStr}\\"}"
+          value: "{\\\"date\\\": \\\"${newDateStr}\\\"}"
         ) {
           id
         }
@@ -667,6 +667,245 @@ app.command('/task-complete', async ({ command, ack, client }) => {
 });
 
 // ============================================
+// TRIGGER ENDPOINT FOR GITHUB ACTIONS
+// ============================================
+
+receiver.app.post('/trigger', async (req, res) => {
+  console.log('🎯 Daily automation trigger received from GitHub Actions');
+  
+  // Respond immediately to prevent timeout
+  res.json({ 
+    status: 'triggered', 
+    timestamp: new Date().toISOString(),
+    message: 'Daily task sync queued for processing'
+  });
+  
+  // Queue the automation work asynchronously
+  asyncQueue.add({
+    type: 'daily_automation',
+    data: { 
+      triggeredBy: req.headers['user-agent'] || 'manual',
+      triggeredAt: new Date().toISOString()
+    },
+    handler: async (data) => {
+      console.log('[ASYNC] Starting daily task automation...');
+      console.log(`[ASYNC] Triggered by: ${data.triggeredBy}`);
+      
+      try {
+        const { WebClient } = require('@slack/web-api');
+        const slack = new WebClient(SLACK_BOT_TOKEN);
+        const { formatSlackMessage } = require('./messageFormatter');
+        
+        // Store for message updates
+        const messageStore = new Map();
+        
+        // Get all active users
+        const usersQuery = `query { users { id name email enabled is_guest } }`;
+        const userData = await mondayQuery(usersQuery);
+        const activeUsers = userData.users.filter(u => u.enabled && !u.is_guest && u.email);
+        
+        console.log(`[ASYNC] Processing ${activeUsers.length} active users`);
+        
+        // Get boards from workspaces
+        const workspaceIds = [12742680, 12691809, 12666498];
+        const allBoards = [];
+        
+        for (const workspaceId of workspaceIds) {
+          const boardsQuery = `
+            query { 
+              boards(workspace_ids: [${workspaceId}], limit: 50) { 
+                id 
+                name 
+                columns {
+                  id
+                  title
+                  type
+                  settings_str
+                }
+              } 
+            }`;
+          const boardData = await mondayQuery(boardsQuery);
+          allBoards.push(...boardData.boards);
+          await new Promise(resolve => setTimeout(resolve, 500)); // Rate limiting
+        }
+        
+        console.log(`[ASYNC] Found ${allBoards.length} boards across ${workspaceIds.length} workspaces`);
+        
+        let processedUsers = 0;
+        let totalTasks = 0;
+        
+        // Process each user
+        for (const user of activeUsers) {
+          try {
+            // Find Slack user by email
+            const slackUserResponse = await slack.users.lookupByEmail({ email: user.email });
+            const slackUserId = slackUserResponse.user.id;
+            
+            // Open DM channel
+            const dmResponse = await slack.conversations.open({ users: slackUserId });
+            const channelId = dmResponse.channel.id;
+            
+            let allUserTasks = [];
+            
+            // Get tasks from each board
+            for (const board of allBoards) {
+              const statusColumn = board.columns.find(c => c.type === 'status');
+              const peopleColumn = board.columns.find(c => c.type === 'people');
+              const dateColumn = board.columns.find(c => c.type === 'date');
+              
+              if (!statusColumn || !peopleColumn) continue;
+              
+              const itemsQuery = `
+                query {
+                  boards(ids: [${board.id}]) {
+                    items_page(limit: 100) {
+                      items {
+                        id
+                        name
+                        created_at
+                        updated_at
+                        column_values {
+                          id
+                          text
+                          value
+                          type
+                        }
+                      }
+                    }
+                  }
+                }`;
+              
+              const itemsData = await mondayQuery(itemsQuery);
+              const items = itemsData.boards[0]?.items_page?.items || [];
+              
+              // Filter for user's incomplete tasks
+              const userTasks = items.filter(item => {
+                const peopleValue = item.column_values.find(cv => cv.id === peopleColumn.id);
+                if (!peopleValue || !peopleValue.value) return false;
+                
+                const peopleData = JSON.parse(peopleValue.value || '{}');
+                const isAssigned = peopleData.personsAndTeams?.some(p => 
+                  p.id === parseInt(user.id) && p.kind === 'person'
+                );
+                
+                if (!isAssigned) return false;
+                
+                const statusValue = item.column_values.find(cv => cv.id === statusColumn.id);
+                if (!statusValue) return true;
+                
+                const statusData = JSON.parse(statusValue.value || '{}');
+                const statusSettings = JSON.parse(statusColumn.settings_str || '{}');
+                const doneColors = statusSettings.done_colors || [1];
+                
+                return !doneColors.includes(statusData.index);
+              }).map(task => {
+                const dateValue = task.column_values.find(cv => cv.id === dateColumn?.id);
+                const dateData = dateValue ? JSON.parse(dateValue.value || '{}') : {};
+                
+                return {
+                  id: task.id,
+                  name: task.name,
+                  boardName: board.name,
+                  boardId: board.id,
+                  dueDate: dateData.date || null,
+                  status: task.column_values.find(cv => cv.id === statusColumn.id)?.text || 'No Status'
+                };
+              });
+              
+              allUserTasks.push(...userTasks);
+              await new Promise(resolve => setTimeout(resolve, 300)); // Rate limiting
+            }
+            
+            totalTasks += allUserTasks.length;
+            
+            if (allUserTasks.length > 0) {
+              // Organize tasks by priority
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              const oneWeekFromNow = new Date(today);
+              oneWeekFromNow.setDate(today.getDate() + 7);
+              
+              const organizedTasks = {
+                overdue: [],
+                dueToday: [],
+                upcoming: [],
+                noDueDate: []
+              };
+              
+              allUserTasks.forEach(task => {
+                if (!task.dueDate) {
+                  organizedTasks.noDueDate.push(task);
+                  return;
+                }
+                
+                const taskDate = new Date(task.dueDate);
+                taskDate.setHours(0, 0, 0, 0);
+                
+                if (taskDate < today) {
+                  organizedTasks.overdue.push(task);
+                } else if (taskDate.getTime() === today.getTime()) {
+                  organizedTasks.dueToday.push(task);
+                } else if (taskDate <= oneWeekFromNow) {
+                  organizedTasks.upcoming.push(task);
+                } else {
+                  organizedTasks.noDueDate.push(task);
+                }
+              });
+              
+              const slackMessage = formatSlackMessage(organizedTasks, user.name);
+              
+              // Check if we already sent a message today
+              const storeKey = `${user.id}-${today.toDateString()}`;
+              const storedMessage = messageStore.get(storeKey);
+              
+              if (storedMessage && storedMessage.channelId === channelId) {
+                // Update existing message
+                await slack.chat.update({
+                  channel: channelId,
+                  ts: storedMessage.messageTs,
+                  blocks: slackMessage.blocks,
+                  text: `${user.name}'s Tasks`
+                });
+              } else {
+                // Send new message
+                const response = await slack.chat.postMessage({
+                  channel: channelId,
+                  blocks: slackMessage.blocks,
+                  text: `${user.name}'s Tasks`
+                });
+                
+                messageStore.set(storeKey, {
+                  channelId,
+                  messageTs: response.ts,
+                  date: today.toDateString(),
+                  lastUpdated: new Date().toISOString()
+                });
+              }
+            }
+            
+            processedUsers++;
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Rate limiting between users
+            
+          } catch (userError) {
+            console.error(`[ASYNC ERROR] Failed to process user ${user.name}:`, userError.message);
+          }
+        }
+        
+        console.log(`[ASYNC] Daily automation complete!`);
+        console.log(`[ASYNC] Processed ${processedUsers}/${activeUsers.length} users`);
+        console.log(`[ASYNC] Found ${totalTasks} total tasks`);
+        
+      } catch (error) {
+        console.error('[ASYNC ERROR] Daily automation failed:', error);
+        throw error;
+      }
+    }
+  });
+  
+  console.log('✅ Automation queued successfully');
+});
+
+// ============================================
 // HEALTH CHECK & METRICS
 // ============================================
 
@@ -706,11 +945,13 @@ receiver.app.get('/', (req, res) => {
       '⚡ Async request handling',
       '📥 Background job queue',
       '🔄 Automatic retries',
-      '📊 Queue metrics'
+      '📊 Queue metrics',
+      '🎯 Daily automation trigger'
     ],
     endpoints: {
       health: '/health',
       metrics: '/metrics',
+      trigger: '/trigger',
       slack_events: '/slack/events',
       monday_webhook: '/webhook/monday'
     },
@@ -735,6 +976,7 @@ receiver.app.get('/', (req, res) => {
     console.log(`🌐 Listening on 0.0.0.0:${PORT}`);
     console.log(`📡 Slack events: /slack/events`);
     console.log(`🔔 Monday webhook: /webhook/monday`);
+    console.log(`🎯 Trigger endpoint: POST /trigger`);
     console.log(`✅ Server started successfully - v5.0.0-async`);
     console.log(`🚀 Async queue enabled - instant responses!`);
     console.log(`📊 Queue metrics: /metrics`);
