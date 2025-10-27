@@ -324,7 +324,14 @@ app.action(/^task_action_.*/, ({ action, ack, body, client }) => {
   // Queue for async processing
   taskQueue.add(async () => {
     try {
-      const [_, actionType, taskId, boardId] = action.action_id.split('_');
+      // FIX: Correct the split indices
+      // action_id format: task_action_complete_<taskId>_<boardId>
+      // Split result: ["task", "action", "complete", taskId, boardId]
+      const parts = action.action_id.split('_');
+      const actionType = parts[2];  // "complete", "update", "postpone", or "view"
+      const taskId = parts[3];
+      const boardId = parts[4];
+      
       const userId = body.user.id;
       
       logger.info(`[BUTTON] User ${userId} triggered ${actionType} on task ${taskId}`);
@@ -351,7 +358,7 @@ app.action(/^task_action_.*/, ({ action, ack, body, client }) => {
           await handleViewTask(taskId, boardId, userId, client, body);
           break;
         default:
-          logger.warn(`Unknown action: ${actionType}`);
+          logger.warn(`Unknown action: ${actionType}`, { actionId: action.action_id, parts });
       }
     } catch (error) {
       logger.error('[BUTTON ERROR] Error handling button click', error);
@@ -503,7 +510,7 @@ async function handleCompleteTask(taskId, boardId, userId, client, body) {
           board_id: ${boardId},
           item_id: ${taskId},
           column_id: "${statusColumn.id}",
-          value: "{\\\"index\\\": ${doneIndex}}"
+          value: "{\\"index\\": ${doneIndex}}"
         ) {
           id
         }
@@ -521,7 +528,7 @@ async function handleCompleteTask(taskId, boardId, userId, client, body) {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: '✅ *Task completed!*\nYour task has been marked as "Done" in Monday.com.'
+            text: '✅ *Task completed!*\\nYour task has been marked as "Done" in Monday.com.'
           }
         }
       ]
@@ -716,7 +723,7 @@ async function handlePostponeTask(taskId, boardId, userId, client, body) {
           board_id: ${boardId},
           item_id: ${taskId},
           column_id: "${dateColumnValue.id}",
-          value: "{\\\"date\\\": \\\"${newDateStr}\\\"}"
+          value: "{\\"date\\": \\"${newDateStr}\\"}"
         ) {
           id
         }
@@ -783,11 +790,11 @@ async function handleViewTask(taskId, boardId, userId, client, body) {
         fields: [
           {
             type: 'mrkdwn',
-            text: `*Created:*\n${new Date(task.created_at).toLocaleDateString()}`
+            text: `*Created:*\\n${new Date(task.created_at).toLocaleDateString()}`
           },
           {
             type: 'mrkdwn',
-            text: `*Creator:*\n${task.creator?.name || 'Unknown'}`
+            text: `*Creator:*\\n${task.creator?.name || 'Unknown'}`
           }
         ]
       },
@@ -825,7 +832,7 @@ async function handleViewTask(taskId, boardId, userId, client, body) {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: `*${update.creator?.name}* - ${new Date(update.created_at).toLocaleDateString()}\n${update.body}`
+            text: `*${update.creator?.name}* - ${new Date(update.created_at).toLocaleDateString()}\\n${update.body}`
           }
         });
       });
@@ -949,7 +956,7 @@ receiver.app.get('/health', (req, res) => {
 receiver.app.get('/', (req, res) => {
   res.json({ 
     message: 'Monday.com → Slack Unified Automation Server',
-    version: '6.1.0-unified-cached',
+    version: '6.2.0-button-fix',
     status: 'running',
     features: [
       '✅ Async request processing',
@@ -1002,7 +1009,7 @@ receiver.app.get('/metrics', (req, res) => {
     logger.info(`📡 Slack events: /slack/events`);
     logger.info(`🔔 Monday webhook: /webhook/monday`);
     logger.info(`🔄 Daily automation trigger: POST /trigger`);
-    logger.success(`✅ Server started successfully - v6.1.0-unified-cached`);
+    logger.success(`✅ Server started successfully - v6.2.0-button-fix`);
     logger.info(`🎯 Available commands: /tasks, /create-task, /quick-task, /monday-help, /task-complete`);
     logger.info(`🚀 Async processing enabled with background job queue`);
     
