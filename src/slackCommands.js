@@ -269,210 +269,264 @@ function initializeSlackCommands(slackApp) {
   // are now handled in automation.js to avoid duplicate handler conflicts.
   // This prevents ReceiverMultipleAckError and timeout issues.
   
-  // FIXED: Main command: /create-task - Using cached data to prevent timeout
-  slackApp.command('/create-task', async ({ command, ack, client }) => {
-    // CRITICAL: Acknowledge IMMEDIATELY as the very first operation
+  // ============================================================================
+  // OPTION 2: /create-task with respond() Pattern (Recommended)
+  // ============================================================================
+  // This implementation eliminates 3-second timeout issues by:
+  // 1. Acknowledging immediately
+  // 2. Showing loading message
+  // 3. Fetching data without time pressure
+  // 4. Replacing with final form
+  // ============================================================================
+  
+  slackApp.command('/create-task', async ({ command, ack, respond, client }) => {
+    // STEP 1: Acknowledge immediately (must happen within 3 seconds)
     await ack();
     
     try {
-      const start = Date.now();
-      
       logger.info('Create task command received', { 
         userId: command.user_id,
         text: command.text 
       });
       
-      // CRITICAL FIX: Use cached data instead of fresh API calls
-      // This reduces response time from 3+ seconds to milliseconds
+      // STEP 2: Show loading message via respond()
+      // This buys us time to fetch data without worrying about timeouts
+      await respond({
+        text: '⏳ Loading task creation form...',
+        response_type: 'ephemeral'
+      });
+      
+      // STEP 3: Fetch data (can take time, no rush!)
+      const start = Date.now();
       const [boards, users] = await Promise.all([
         getCachedBoards(),
         getCachedUsers()
       ]);
       
       const fetchDuration = Date.now() - start;
-      logger.info('Data fetched for modal', { 
+      logger.info('Data fetched for form', { 
         duration: fetchDuration + 'ms',
         boards: boards.length,
         users: users.length
       });
       
-      // Now open modal with the actual data
-      await client.views.open({
-        trigger_id: command.trigger_id,
-        view: {
-          type: 'modal',
-          callback_id: 'create_task_modal',
-          title: {
+      // STEP 4: Build the form blocks
+      const blocks = [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: '*Create a New Task on Monday.com*\n\nFill out the form below to create your task.'
+          }
+        },
+        { type: 'divider' },
+        {
+          type: 'input',
+          block_id: 'task_name',
+          label: {
             type: 'plain_text',
-            text: 'Create Monday.com Task'
+            text: 'Task Name'
           },
-          submit: {
+          element: {
+            type: 'plain_text_input',
+            action_id: 'task_name_value',
+            placeholder: {
+              type: 'plain_text',
+              text: 'Enter task name...'
+            }
+          }
+        },
+        {
+          type: 'input',
+          block_id: 'board_select',
+          label: {
             type: 'plain_text',
-            text: 'Create Task'
+            text: 'Board'
           },
-          close: {
+          element: {
+            type: 'static_select',
+            action_id: 'board_select_value',
+            placeholder: {
+              type: 'plain_text',
+              text: 'Select a board'
+            },
+            options: boards.slice(0, 100).map(board => ({
+              text: {
+                type: 'plain_text',
+                text: `${board.name} (${board.workspace?.name || 'No workspace'})`
+              },
+              value: board.id
+            }))
+          }
+        },
+        {
+          type: 'input',
+          block_id: 'assignees',
+          optional: true,
+          label: {
             type: 'plain_text',
-            text: 'Cancel'
+            text: 'Assign To (optional)'
           },
-          blocks: [
-            {
-              type: 'input',
-              block_id: 'task_name',
-              label: {
+          element: {
+            type: 'multi_static_select',
+            action_id: 'assignees_value',
+            placeholder: {
+              type: 'plain_text',
+              text: 'Select team members'
+            },
+            options: users.slice(0, 100).map(user => ({
+              text: {
                 type: 'plain_text',
-                text: 'Task Name'
+                text: user.name
               },
-              element: {
-                type: 'plain_text_input',
-                action_id: 'task_name_input',
-                placeholder: {
-                  type: 'plain_text',
-                  text: 'Enter task name...'
-                }
-              }
+              value: user.id
+            }))
+          }
+        },
+        {
+          type: 'input',
+          block_id: 'due_date',
+          optional: true,
+          label: {
+            type: 'plain_text',
+            text: 'Due Date (optional)'
+          },
+          element: {
+            type: 'datepicker',
+            action_id: 'due_date_value',
+            placeholder: {
+              type: 'plain_text',
+              text: 'Select a date'
+            }
+          }
+        },
+        {
+          type: 'actions',
+          elements: [
+            {
+              type: 'button',
+              text: {
+                type: 'plain_text',
+                text: '✅ Create Task'
+              },
+              style: 'primary',
+              action_id: 'create_task_submit',
+              value: JSON.stringify({ userId: command.user_id })
             },
             {
-              type: 'input',
-              block_id: 'board_select',
-              label: {
+              type: 'button',
+              text: {
                 type: 'plain_text',
-                text: 'Board'
+                text: '❌ Cancel'
               },
-              element: {
-                type: 'static_select',
-                action_id: 'board_select_input',
-                placeholder: {
-                  type: 'plain_text',
-                  text: 'Select a board'
-                },
-                options: boards.slice(0, 100).map(board => ({
-                  text: {
-                    type: 'plain_text',
-                    text: `${board.name} (${board.workspace?.name || 'No workspace'})`
-                  },
-                  value: board.id
-                }))
-              }
-            },
-            {
-              type: 'input',
-              block_id: 'assignees',
-              optional: true,
-              label: {
-                type: 'plain_text',
-                text: 'Assign To'
-              },
-              element: {
-                type: 'multi_static_select',
-                action_id: 'assignees_input',
-                placeholder: {
-                  type: 'plain_text',
-                  text: 'Select team members'
-                },
-                options: users.slice(0, 100).map(user => ({
-                  text: {
-                    type: 'plain_text',
-                    text: user.name
-                  },
-                  value: user.id
-                }))
-              }
-            },
-            {
-              type: 'input',
-              block_id: 'due_date',
-              optional: true,
-              label: {
-                type: 'plain_text',
-                text: 'Due Date'
-              },
-              element: {
-                type: 'datepicker',
-                action_id: 'due_date_input',
-                placeholder: {
-                  type: 'plain_text',
-                  text: 'Select a date'
-                }
-              }
-            },
-            {
-              type: 'input',
-              block_id: 'status',
-              optional: true,
-              label: {
-                type: 'plain_text',
-                text: 'Status (optional)'
-              },
-              element: {
-                type: 'plain_text_input',
-                action_id: 'status_input',
-                placeholder: {
-                  type: 'plain_text',
-                  text: 'e.g., Working on it, Stuck, Done'
-                }
-              }
+              action_id: 'create_task_cancel'
             }
           ]
         }
+      ];
+      
+      // STEP 5: Send the form via respond() - no time pressure!
+      // replace_original: true replaces the loading message with the form
+      await respond({
+        blocks: blocks,
+        replace_original: true,
+        response_type: 'ephemeral'
       });
       
       const totalDuration = Date.now() - start;
-      logger.info('Modal opened successfully', { 
+      logger.info('Form displayed successfully', { 
         totalDuration: totalDuration + 'ms'
       });
       
     } catch (error) {
-      logger.error('Error opening create task modal', error);
+      logger.error('Error displaying create task form', error);
       
-      // Send error message to user
-      try {
-        await client.chat.postEphemeral({
-          channel: command.channel_id,
-          user: command.user_id,
-          text: '❌ Sorry, there was an error opening the task creation form. Please try again.'
-        });
-      } catch (notifyError) {
-        logger.error('Failed to send error notification', notifyError);
-      }
+      await respond({
+        text: '❌ Sorry, there was an error loading the task creation form. Please try again.',
+        replace_original: true,
+        response_type: 'ephemeral'
+      });
     }
   });
   
-  // Handle modal submission
-  slackApp.view('create_task_modal', async ({ ack, body, view, client }) => {
+  // ============================================================================
+  // Handle Create Task Button Click
+  // ============================================================================
+  
+  slackApp.action('create_task_submit', async ({ ack, body, client }) => {
     await ack();
     
     try {
-      const values = view.state.values;
+      // Extract values from the message blocks
+      const values = {};
+      body.message.blocks.forEach(block => {
+        if (block.type === 'input') {
+          const element = block.element;
+          if (element.type === 'plain_text_input') {
+            values[block.block_id] = element.value || null;
+          } else if (element.type === 'static_select') {
+            values[block.block_id] = element.selected_option?.value || null;
+          } else if (element.type === 'multi_static_select') {
+            values[block.block_id] = element.selected_options?.map(opt => opt.value) || [];
+          } else if (element.type === 'datepicker') {
+            values[block.block_id] = element.selected_date || null;
+          }
+        }
+      });
       
-      const taskName = values.task_name.task_name_input.value;
-      const boardId = values.board_select.board_select_input.selected_option.value;
-      const assignees = values.assignees.assignees_input.selected_options?.map(opt => opt.value) || [];
-      const dueDate = values.due_date.due_date_input.selected_date || null;
-      const status = values.status.status_input.value || null;
+      const taskName = values.task_name;
+      const boardId = values.board_select;
+      const assignees = values.assignees || [];
+      const dueDate = values.due_date;
       
-      logger.info('Creating task', {
+      // Validate required fields
+      if (!taskName || !boardId) {
+        await client.chat.postEphemeral({
+          channel: body.channel.id,
+          user: body.user.id,
+          text: '❌ Please fill in the Task Name and Board fields.'
+        });
+        return;
+      }
+      
+      logger.info('Creating task from form', {
         taskName,
         boardId,
         assignees,
         dueDate,
-        status,
         userId: body.user.id
       });
       
-      // Create the task
-      const createdTask = await createMondayTask(boardId, taskName, assignees, dueDate, status);
-      
-      // Send success message to the user
-      await client.chat.postEphemeral({
-        channel: body.user.id,
-        user: body.user.id,
-        text: `✅ Task created successfully!`,
+      // Update message to show progress
+      await client.chat.update({
+        channel: body.channel.id,
+        ts: body.message.ts,
+        text: '⏳ Creating task on Monday.com...',
         blocks: [
           {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: `✅ *Task Created Successfully!*\n\n*Task:* ${createdTask.name}\n*Board:* ${createdTask.board.name}\n*Assigned to:* ${assignees.length} ${assignees.length === 1 ? 'person' : 'people'}\n${dueDate ? `*Due Date:* ${dueDate}` : ''}`
+              text: '⏳ *Creating task...*\n\nPlease wait while we create your task on Monday.com.'
+            }
+          }
+        ]
+      });
+      
+      // Create the task on Monday.com
+      const createdTask = await createMondayTask(boardId, taskName, assignees, dueDate, null);
+      
+      // Update message with success
+      await client.chat.update({
+        channel: body.channel.id,
+        ts: body.message.ts,
+        text: '✅ Task created successfully!',
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `✅ *Task Created Successfully!*\n\n*Task:* ${createdTask.name}\n*Board:* ${createdTask.board.name}\n*Assigned to:* ${assignees.length} ${assignees.length === 1 ? 'person' : 'people'}${dueDate ? `\n*Due Date:* ${dueDate}` : ''}`
             }
           },
           {
@@ -499,16 +553,55 @@ function initializeSlackCommands(slackApp) {
       });
       
     } catch (error) {
-      logger.error('Error creating task', error);
+      logger.error('Error creating task from button', error);
       
-      // Send error message
-      await client.chat.postEphemeral({
-        channel: body.user.id,
-        user: body.user.id,
-        text: '❌ Sorry, there was an error creating the task. Please try again or contact support.'
+      await client.chat.update({
+        channel: body.channel.id,
+        ts: body.message.ts,
+        text: '❌ Error creating task',
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '❌ *Error creating task*\n\nSorry, there was an error creating the task. Please try again.'
+            }
+          }
+        ]
       });
     }
   });
+  
+  // ============================================================================
+  // Handle Cancel Button Click
+  // ============================================================================
+  
+  slackApp.action('create_task_cancel', async ({ ack, body, client }) => {
+    await ack();
+    
+    try {
+      await client.chat.update({
+        channel: body.channel.id,
+        ts: body.message.ts,
+        text: 'Cancelled',
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '❌ Task creation cancelled.'
+            }
+          }
+        ]
+      });
+    } catch (error) {
+      logger.error('Error handling cancel button', error);
+    }
+  });
+  
+  // ============================================================================
+  // Other Commands (Quick Task, Help)
+  // ============================================================================
   
   // FIXED: Quick create command - Proper async acknowledgment
   slackApp.command('/quick-task', async ({ command, ack, respond }) => {
@@ -650,7 +743,7 @@ function initializeSlackCommands(slackApp) {
     });
   });
   
-  logger.info('Slack commands initialized with caching enabled');
+  logger.info('✅ Slack commands initialized with respond() pattern for /create-task');
 }
 
 module.exports = {
