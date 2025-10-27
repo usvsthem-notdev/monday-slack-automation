@@ -30,8 +30,92 @@ const logger = {
       stack: error.stack,
       timestamp: new Date().toISOString() 
     }));
+  },
+  warn: (msg, data = {}) => {
+    console.log(JSON.stringify({ 
+      level: 'warn', 
+      message: msg, 
+      data, 
+      timestamp: new Date().toISOString() 
+    }));
   }
 };
+
+// ============================================
+// CACHING LAYER - Fixes timeout issue
+// ============================================
+let boardsCache = { data: null, timestamp: 0 };
+let usersCache = { data: null, timestamp: 0 };
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function getCachedBoards() {
+  const now = Date.now();
+  
+  // Return cached data if still fresh
+  if (boardsCache.data && (now - boardsCache.timestamp) < CACHE_TTL) {
+    logger.info('Returning cached boards', { 
+      age: Math.round((now - boardsCache.timestamp) / 1000) + 's',
+      count: boardsCache.data.length 
+    });
+    return boardsCache.data;
+  }
+  
+  // Fetch fresh data
+  logger.info('Fetching fresh boards data from Monday.com');
+  const boards = await getAllBoards();
+  boardsCache = { data: boards, timestamp: now };
+  logger.info('Boards cache refreshed', { count: boards.length });
+  
+  return boards;
+}
+
+async function getCachedUsers() {
+  const now = Date.now();
+  
+  // Return cached data if still fresh
+  if (usersCache.data && (now - usersCache.timestamp) < CACHE_TTL) {
+    logger.info('Returning cached users', { 
+      age: Math.round((now - usersCache.timestamp) / 1000) + 's',
+      count: usersCache.data.length 
+    });
+    return usersCache.data;
+  }
+  
+  // Fetch fresh data
+  logger.info('Fetching fresh users data from Monday.com');
+  const users = await getUsers();
+  usersCache = { data: users, timestamp: now };
+  logger.info('Users cache refreshed', { count: users.length });
+  
+  return users;
+}
+
+// Expose cache for external pre-warming
+async function prewarmCache() {
+  try {
+    const start = Date.now();
+    const [boards, users] = await Promise.all([
+      getCachedBoards(),
+      getCachedUsers()
+    ]);
+    const duration = Date.now() - start;
+    
+    logger.info('✅ Cache pre-warmed successfully', { 
+      boards: boards.length,
+      users: users.length,
+      duration: duration + 'ms'
+    });
+    
+    return { boards: boards.length, users: users.length, duration };
+  } catch (error) {
+    logger.error('Failed to pre-warm cache', error);
+    throw error;
+  }
+}
+
+// ============================================
+// MONDAY.COM API FUNCTIONS
+// ============================================
 
 // Monday.com GraphQL helper
 async function mondayQuery(query) {
@@ -174,6 +258,10 @@ async function getBoardColumns(boardId) {
   return data.boards[0].columns;
 }
 
+// ============================================
+// SLACK COMMAND HANDLERS
+// ============================================
+
 // Initialize Slack App with commands
 function initializeSlackCommands(slackApp) {
   
@@ -181,23 +269,32 @@ function initializeSlackCommands(slackApp) {
   // are now handled in automation.js to avoid duplicate handler conflicts.
   // This prevents ReceiverMultipleAckError and timeout issues.
   
-  // FIXED: Main command: /create-task - Fetch data BEFORE opening modal
+  // FIXED: Main command: /create-task - Using cached data to prevent timeout
   slackApp.command('/create-task', async ({ command, ack, client }) => {
     // CRITICAL: Acknowledge IMMEDIATELY as the very first operation
     await ack();
     
     try {
+      const start = Date.now();
+      
       logger.info('Create task command received', { 
         userId: command.user_id,
         text: command.text 
       });
       
-      // CRITICAL FIX: Fetch boards and users FIRST, then open modal with trigger_id
-      // The trigger_id is valid for 3 seconds, so we need to be fast
+      // CRITICAL FIX: Use cached data instead of fresh API calls
+      // This reduces response time from 3+ seconds to milliseconds
       const [boards, users] = await Promise.all([
-        getAllBoards(),
-        getUsers()
+        getCachedBoards(),
+        getCachedUsers()
       ]);
+      
+      const fetchDuration = Date.now() - start;
+      logger.info('Data fetched for modal', { 
+        duration: fetchDuration + 'ms',
+        boards: boards.length,
+        users: users.length
+      });
       
       // Now open modal with the actual data
       await client.views.open({
@@ -317,6 +414,11 @@ function initializeSlackCommands(slackApp) {
             }
           ]
         }
+      });
+      
+      const totalDuration = Date.now() - start;
+      logger.info('Modal opened successfully', { 
+        totalDuration: totalDuration + 'ms'
       });
       
     } catch (error) {
@@ -441,8 +543,8 @@ function initializeSlackCommands(slackApp) {
         response_type: 'ephemeral'
       });
       
-      // For quick tasks, use a default board or the first available board
-      const boards = await getAllBoards();
+      // For quick tasks, use cached boards
+      const boards = await getCachedBoards();
       if (boards.length === 0) {
         await respond({
           text: '❌ No boards found. Please create a board on Monday.com first.',
@@ -548,9 +650,12 @@ function initializeSlackCommands(slackApp) {
     });
   });
   
-  logger.info('Slack commands initialized');
+  logger.info('Slack commands initialized with caching enabled');
 }
 
 module.exports = {
-  initializeSlackCommands
+  initializeSlackCommands,
+  prewarmCache,
+  getCachedBoards,
+  getCachedUsers
 };

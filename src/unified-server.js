@@ -6,7 +6,7 @@ const express = require('express');
 const path = require('path');
 
 // Import command modules
-const { initializeSlackCommands } = require('./slackCommands');
+const { initializeSlackCommands, prewarmCache } = require('./slackCommands');
 const { registerTasksCommand } = require('./tasksCommand');
 const { handleWebhook } = require('./webhookHandler');
 const { formatSlackMessage } = require('./messageFormatter');
@@ -111,7 +111,8 @@ const metrics = {
   commandsProcessed: 0,
   asyncTasksQueued: 0,
   startTime: new Date(),
-  lastRun: null
+  lastRun: null,
+  cacheStats: null
 };
 
 // ============================================
@@ -502,7 +503,7 @@ async function handleCompleteTask(taskId, boardId, userId, client, body) {
           board_id: ${boardId},
           item_id: ${taskId},
           column_id: "${statusColumn.id}",
-          value: "{\\"index\\": ${doneIndex}}"
+          value: "{\\\"index\\\": ${doneIndex}}"
         ) {
           id
         }
@@ -715,7 +716,7 @@ async function handlePostponeTask(taskId, boardId, userId, client, body) {
           board_id: ${boardId},
           item_id: ${taskId},
           column_id: "${dateColumnValue.id}",
-          value: "{\\"date\\": \\"${newDateStr}\\"}"
+          value: "{\\\"date\\\": \\\"${newDateStr}\\\"}"
         ) {
           id
         }
@@ -948,7 +949,7 @@ receiver.app.get('/health', (req, res) => {
 receiver.app.get('/', (req, res) => {
   res.json({ 
     message: 'Monday.com → Slack Unified Automation Server',
-    version: '6.0.0-unified',
+    version: '6.1.0-unified-cached',
     status: 'running',
     features: [
       '✅ Async request processing',
@@ -957,7 +958,8 @@ receiver.app.get('/', (req, res) => {
       '✅ Real-time webhooks',
       '✅ Task action buttons',
       '✅ Modal interactions',
-      '✅ Background job queue'
+      '✅ Background job queue',
+      '✅ Caching layer for boards and users'
     ],
     endpoints: {
       health: 'GET /health',
@@ -1000,9 +1002,22 @@ receiver.app.get('/metrics', (req, res) => {
     logger.info(`📡 Slack events: /slack/events`);
     logger.info(`🔔 Monday webhook: /webhook/monday`);
     logger.info(`🔄 Daily automation trigger: POST /trigger`);
-    logger.success(`✅ Server started successfully - v6.0.0-unified`);
+    logger.success(`✅ Server started successfully - v6.1.0-unified-cached`);
     logger.info(`🎯 Available commands: /tasks, /create-task, /quick-task, /monday-help, /task-complete`);
     logger.info(`🚀 Async processing enabled with background job queue`);
+    
+    // ============================================
+    // PRE-WARM CACHE ON STARTUP
+    // ============================================
+    logger.info('🔄 Pre-warming command cache...');
+    try {
+      const cacheStats = await prewarmCache();
+      metrics.cacheStats = cacheStats;
+      logger.success('✅ Cache pre-warmed', cacheStats);
+    } catch (cacheError) {
+      logger.warn('⚠️ Failed to pre-warm cache (will warm on first use)', cacheError);
+    }
+    
   } catch (error) {
     logger.error('❌ Failed to start server', error);
     process.exit(1);
