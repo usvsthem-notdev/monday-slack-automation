@@ -4,7 +4,7 @@ const { App, ExpressReceiver } = require('@slack/bolt');
 const axios = require('axios');
 const express = require('express');
 const path = require('path');
-const { initializeSlackCommands } = require('./slackCommands');
+const { initializeSlackCommands, prewarmCache } = require('./slackCommands');
 const { registerTasksCommand } = require('./tasksCommand');
 const { handleWebhook } = require('./webhookHandler');
 const { formatSlackMessage } = require('./messageFormatter');
@@ -179,7 +179,7 @@ async function sendOrUpdateSlackMessage(user, slackMessage) {
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function runAutomation() {
-  logger.info('🚀 Starting automation');
+  logger.info('🚀 Starting daily task automation');
   metrics.usersProcessed = 0;
   metrics.usersSkipped = 0;
   metrics.tasksFound = 0;
@@ -212,7 +212,7 @@ async function runAutomation() {
     }
     const duration = (new Date() - metrics.startTime) / 1000;
     metrics.lastRun = new Date().toISOString();
-    logger.success('✅ Automation completed', { ...metrics, durationSeconds: duration.toFixed(2) });
+    logger.success('✅ Daily automation completed', { ...metrics, durationSeconds: duration.toFixed(2) });
     return metrics;
   } catch (error) {
     logger.error('❌ Automation failed', error);
@@ -797,12 +797,27 @@ async function startServer() {
     initializeSlackCommands(slackApp);
     registerTasksCommand(slackApp);
     
+    // 🔥 NEW: Pre-warm the cache immediately on startup
+    logger.info('🔥 Pre-warming Monday.com data cache...');
+    await prewarmCache().catch(err => {
+      logger.error('Failed to pre-warm cache on startup', err);
+    });
+    
+    // 🔄 NEW: Set up periodic cache refresh (every 4 minutes to stay ahead of 5min TTL)
+    setInterval(async () => {
+      logger.info('🔄 Refreshing cache (periodic)...');
+      await prewarmCache().catch(err => {
+        logger.error('Failed to refresh cache', err);
+      });
+    }, 4 * 60 * 1000); // Every 4 minutes
+    
     // Start the Slack app
     await slackApp.start(PORT);
     
     logger.success(`⚡️ Server running on port ${PORT}`);
     logger.success('✅ Commands: /create-task, /quick-task, /monday-help, /tasks, /task-complete');
     logger.info('🎯 Interactive components: task buttons, modals, and actions enabled');
+    logger.info('🔥 Cache pre-warming enabled with 4-minute refresh cycle');
   } catch (error) {
     logger.error('❌ Failed to start', error);
     process.exit(1);
@@ -834,7 +849,7 @@ receiver.app.get('/health', (req, res) => res.json({ status: 'ok', uptime: proce
 
 receiver.app.get('/', (req, res) => res.json({ 
   message: 'Monday → Slack Automation', 
-  version: '4.8.0-consolidated', 
+  version: '4.9.0-cache-prewarm', 
   status: 'running', 
   lastRun: metrics.lastRun,
   endpoints: {
@@ -855,7 +870,9 @@ receiver.app.get('/', (req, res) => res.json({
     'Interactive task buttons',
     'Task update modals',
     'Monday.com webhooks',
-    'Automated task notifications'
+    'Automated task notifications',
+    'Cache pre-warming on startup',
+    'Periodic cache refresh'
   ]
 }));
 
