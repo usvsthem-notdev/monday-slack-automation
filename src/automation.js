@@ -4,6 +4,7 @@ const { App, ExpressReceiver } = require('@slack/bolt');
 const axios = require('axios');
 const express = require('express');
 const path = require('path');
+const os = require('os');
 const { initializeSlackCommands, prewarmCache } = require('./slackCommands');
 const { registerTasksCommand } = require('./tasksCommand');
 const { handleWebhook } = require('./webhookHandler');
@@ -15,6 +16,7 @@ const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN;
 const SLACK_SIGNING_SECRET = process.env.SLACK_SIGNING_SECRET;
 const TEST_MODE = process.env.TEST_MODE === 'true';
 const PORT = process.env.PORT || 10000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
 
 const slack = new WebClient(SLACK_BOT_TOKEN);
 const receiver = new ExpressReceiver({ signingSecret: SLACK_SIGNING_SECRET });
@@ -33,7 +35,7 @@ const taskMetadata = new Map(); // Store task metadata for interactive component
 const metrics = {
   usersProcessed: 0, usersSkipped: 0, tasksFound: 0, messagesUpdated: 0,
   messagesSent: 0, errors: 0, webhooksReceived: 0, notificationsSent: 0,
-  startTime: new Date(), lastRun: null
+  startTime: new Date(), lastRun: null, requestCount: 0, totalRequestDuration: 0
 };
 
 const logger = {
@@ -48,6 +50,19 @@ const QUERIES = {
   getBoardsByWorkspace: (workspaceId) => `query { boards(workspace_ids: [${workspaceId}], limit: 50) { id name columns { id title type settings_str } } }`,
   getBoardItems: (boardId) => `query { boards(ids: [${boardId}]) { items_page(limit: 100) { items { id name created_at updated_at column_values { id text value type } } } } }`
 };
+
+// Helper function to get local IP address
+function getLocalIP() {
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return 'localhost';
+}
 
 async function mondayQuery(query) {
   try {
@@ -302,7 +317,7 @@ async function handleCompleteTask(taskId, boardId, userId, client, body) {
           board_id: ${boardId},
           item_id: ${taskId},
           column_id: "${statusColumn.id}",
-          value: "{\\"index\\": ${doneIndex}}"
+          value: "{\\\"index\\\": ${doneIndex}}"
         ) {
           id
         }
@@ -612,7 +627,7 @@ async function handlePostponeTask(taskId, boardId, userId, client, body) {
           board_id: ${boardId},
           item_id: ${taskId},
           column_id: "${dateColumnValue.id}",
-          value: "{\\"date\\": \\"${newDateStr}\\"}"
+          value: "{\\\"date\\\": \\\"${newDateStr}\\\"}"
         ) {
           id
         }
@@ -791,35 +806,230 @@ slackApp.command('/task-complete', async ({ command, ack, client }) => {
   });
 });
 
+// ============================================
+// ENHANCED SERVER STARTUP FUNCTION
+// ============================================
+
 async function startServer() {
+  let server;
+  
   try {
+    logger.info('🚀 Initializing Monday → Slack Automation Server...');
+    
     // Initialize all Slack commands
+    logger.info('📝 Registering Slack commands...');
     initializeSlackCommands(slackApp);
     registerTasksCommand(slackApp);
+    logger.success('✅ Slack commands registered');
     
-    // 🔥 NEW: Pre-warm the cache immediately on startup
+    // Add request logging middleware
+    receiver.app.use((req, res, next) => {
+      const start = Date.now();
+      const method = req.method;
+      const path = req.path;
+      
+      // Log request
+      logger.info('HTTP Request', { method, path, ip: req.ip });
+      
+      // Track response
+      res.on('finish', () => {
+        const duration = Date.now() - start;
+        const statusCode = res.statusCode;
+        const statusEmoji = statusCode >= 500 ? '❌' : statusCode >= 400 ? '⚠️' : '✅';
+        
+        metrics.requestCount++;
+        metrics.totalRequestDuration += duration;
+        
+        logger.info('HTTP Response', {
+          method,
+          path,
+          statusCode,
+          duration: `${duration}ms`,
+          emoji: statusEmoji
+        });
+      });
+      
+      next();
+    });
+    
+    // Add enhanced health check endpoint with memory stats
+    receiver.app.get('/health', (req, res) => {
+      const uptime = process.uptime();
+      const memoryUsage = process.memoryUsage();
+      const avgRequestDuration = metrics.requestCount > 0 
+        ? (metrics.totalRequestDuration / metrics.requestCount).toFixed(2) 
+        : 0;
+      
+      res.json({
+        status: 'healthy',
+        uptime: Math.floor(uptime),
+        timestamp: new Date().toISOString(),
+        memory: {
+          rss: `${Math.round(memoryUsage.rss / 1024 / 1024)}MB`,
+          heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`,
+          heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`,
+          external: `${Math.round(memoryUsage.external / 1024 / 1024)}MB`
+        },
+        performance: {
+          avgRequestDuration: `${avgRequestDuration}ms`,
+          totalRequests: metrics.requestCount
+        },
+        environment: {
+          nodeVersion: process.version,
+          platform: process.platform,
+          env: NODE_ENV
+        },
+        lastRun: metrics.lastRun,
+        metrics: {
+          ...metrics,
+          uptime: Math.floor(uptime)
+        }
+      });
+    });
+    
+    // Add error handling middleware
+    receiver.app.use((err, req, res, next) => {
+      logger.error('Express middleware error', err);
+      metrics.errors++;
+      
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: 'Internal server error',
+          message: err.message,
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+    
+    // Pre-warm the cache immediately on startup
     logger.info('🔥 Pre-warming Monday.com data cache...');
     await prewarmCache().catch(err => {
       logger.error('Failed to pre-warm cache on startup', err);
     });
+    logger.success('✅ Cache pre-warmed successfully');
     
-    // 🔄 NEW: Set up periodic cache refresh (every 4 minutes to stay ahead of 5min TTL)
-    setInterval(async () => {
+    // Set up periodic cache refresh (every 4 minutes to stay ahead of 5min TTL)
+    logger.info('⏰ Setting up periodic cache refresh (every 4 minutes)...');
+    const cacheRefreshInterval = setInterval(async () => {
       logger.info('🔄 Refreshing cache (periodic)...');
       await prewarmCache().catch(err => {
         logger.error('Failed to refresh cache', err);
       });
-    }, 4 * 60 * 1000); // Every 4 minutes
+    }, 4 * 60 * 1000);
     
     // Start the Slack app
-    await slackApp.start(PORT);
+    logger.info(`🌐 Starting server on port ${PORT}...`);
+    server = await slackApp.start(PORT);
     
-    logger.success(`⚡️ Server running on port ${PORT}`);
-    logger.success('✅ Commands: /create-task, /quick-task, /monday-help, /tasks, /task-complete');
-    logger.info('🎯 Interactive components: task buttons, modals, and actions enabled');
-    logger.info('🔥 Cache pre-warming enabled with 4-minute refresh cycle');
+    // Get local IP for network access
+    const localIP = getLocalIP();
+    
+    // Print beautiful startup banner
+    console.log('\n' + '='.repeat(70));
+    console.log('🎉  SERVER STARTED SUCCESSFULLY!');
+    console.log('='.repeat(70));
+    console.log(`\n📍 Local:      http://localhost:${PORT}`);
+    console.log(`🌐 Network:    http://${localIP}:${PORT}`);
+    console.log(`\n🔗 ENDPOINTS:`);
+    console.log(`   • Root:        http://localhost:${PORT}/`);
+    console.log(`   • Health:      http://localhost:${PORT}/health`);
+    console.log(`   • Metrics:     http://localhost:${PORT}/metrics`);
+    console.log(`   • Slack:       http://localhost:${PORT}/slack/events`);
+    console.log(`   • Webhook:     http://localhost:${PORT}/webhook/monday`);
+    console.log(`   • Trigger:     http://localhost:${PORT}/trigger`);
+    console.log(`\n⚡ SLACK COMMANDS:`);
+    console.log(`   • /tasks          - View your tasks`);
+    console.log(`   • /create-task    - Create a new task`);
+    console.log(`   • /quick-task     - Quick task creation`);
+    console.log(`   • /monday-help    - Get help`);
+    console.log(`   • /task-complete  - Mark task complete`);
+    console.log(`\n✨ FEATURES:`);
+    console.log(`   • Interactive task buttons`);
+    console.log(`   • Task update modals`);
+    console.log(`   • Monday.com webhooks`);
+    console.log(`   • Automated notifications`);
+    console.log(`   • Cache pre-warming (4min refresh)`);
+    console.log(`   • Request logging & monitoring`);
+    console.log(`   • Graceful shutdown handling`);
+    console.log(`\n📊 ENVIRONMENT:`);
+    console.log(`   • Node.js:     ${process.version}`);
+    console.log(`   • Platform:    ${process.platform}`);
+    console.log(`   • Mode:        ${NODE_ENV}`);
+    console.log(`   • Test Mode:   ${TEST_MODE ? 'Enabled' : 'Disabled'}`);
+    console.log('\n' + '='.repeat(70));
+    console.log('💡 Press Ctrl+C to stop the server');
+    console.log('='.repeat(70) + '\n');
+    
+    logger.success('⚡️ Server initialization complete');
+    
+    // Graceful shutdown handling
+    const gracefulShutdown = async (signal) => {
+      logger.info(`\n\n⚠️  Received ${signal} - Starting graceful shutdown...`);
+      
+      console.log('\n' + '='.repeat(70));
+      console.log('🛑  SHUTTING DOWN SERVER...');
+      console.log('='.repeat(70) + '\n');
+      
+      // Clear the cache refresh interval
+      if (cacheRefreshInterval) {
+        clearInterval(cacheRefreshInterval);
+        logger.info('✅ Stopped cache refresh interval');
+      }
+      
+      // Stop accepting new connections
+      if (server && server.close) {
+        logger.info('🔌 Closing server connections...');
+        await new Promise((resolve) => {
+          server.close((err) => {
+            if (err) {
+              logger.error('Error closing server', err);
+            } else {
+              logger.success('✅ Server connections closed');
+            }
+            resolve();
+          });
+        });
+      }
+      
+      // Log final metrics
+      const uptime = process.uptime();
+      logger.info('📊 Final Server Statistics:', {
+        uptime: `${Math.floor(uptime)}s`,
+        totalRequests: metrics.requestCount,
+        webhooksReceived: metrics.webhooksReceived,
+        messagesSent: metrics.messagesSent,
+        errors: metrics.errors
+      });
+      
+      console.log('\n' + '='.repeat(70));
+      console.log('✅  SERVER SHUTDOWN COMPLETE');
+      console.log('='.repeat(70) + '\n');
+      
+      process.exit(0);
+    };
+    
+    // Register shutdown handlers
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    
+    // Handle uncaught errors
+    process.on('uncaughtException', (error) => {
+      logger.error('❌ Uncaught Exception', error);
+      gracefulShutdown('UNCAUGHT_EXCEPTION');
+    });
+    
+    process.on('unhandledRejection', (reason, promise) => {
+      logger.error('❌ Unhandled Rejection', { reason, promise });
+    });
+    
   } catch (error) {
-    logger.error('❌ Failed to start', error);
+    logger.error('❌ Failed to start server', error);
+    console.error('\n' + '='.repeat(70));
+    console.error('❌  SERVER STARTUP FAILED!');
+    console.error('='.repeat(70));
+    console.error(`\nError: ${error.message}`);
+    console.error(`\nStack: ${error.stack}`);
+    console.error('\n' + '='.repeat(70) + '\n');
     process.exit(1);
   }
 }
@@ -845,13 +1055,12 @@ receiver.app.post('/trigger', async (req, res) => {
   runAutomation().catch(error => logger.error('Trigger failed', error));
 });
 
-receiver.app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime(), lastRun: metrics.lastRun, metrics }));
-
 receiver.app.get('/', (req, res) => res.json({ 
   message: 'Monday → Slack Automation', 
-  version: '4.9.0-cache-prewarm', 
+  version: '4.10.0-enhanced-monitoring', 
   status: 'running', 
   lastRun: metrics.lastRun,
+  uptime: Math.floor(process.uptime()),
   endpoints: {
     health: '/health',
     slack_events: '/slack/events',
@@ -872,10 +1081,34 @@ receiver.app.get('/', (req, res) => res.json({
     'Monday.com webhooks',
     'Automated task notifications',
     'Cache pre-warming on startup',
-    'Periodic cache refresh'
+    'Periodic cache refresh (4min)',
+    'Request logging & monitoring',
+    'Enhanced health checks',
+    'Graceful shutdown handling'
   ]
 }));
 
-receiver.app.get('/metrics', (req, res) => res.json({ ...metrics, uptime: process.uptime(), timestamp: new Date().toISOString() }));
+receiver.app.get('/metrics', (req, res) => {
+  const uptime = process.uptime();
+  const memoryUsage = process.memoryUsage();
+  const avgRequestDuration = metrics.requestCount > 0 
+    ? (metrics.totalRequestDuration / metrics.requestCount).toFixed(2) 
+    : 0;
+  
+  res.json({ 
+    ...metrics,
+    uptime: Math.floor(uptime),
+    timestamp: new Date().toISOString(),
+    performance: {
+      avgRequestDuration: `${avgRequestDuration}ms`,
+      totalRequests: metrics.requestCount
+    },
+    memory: {
+      rss: `${Math.round(memoryUsage.rss / 1024 / 1024)}MB`,
+      heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`,
+      heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`
+    }
+  });
+});
 
 startServer();
