@@ -8,11 +8,22 @@
     "dev": "NODE_ENV=development node src/unified-server.js",
     "test": "node tests/automation.test.js",
     "legacy-server": "node src/server.js",
-    "legacy-automation": "node src/automation.js"
+    "legacy-automation": "node src/automation.js",
+    "profile:flame": "0x --output-dir=.profiles/flame src/unified-server.js",
+    "profile:doctor": "clinic doctor --on-port 'autocannon -c 10 -d 30 localhost:$PORT/health' --dest .profiles/doctor -- node src/unified-server.js",
+    "profile:heapprofiler": "clinic heapprofiler --on-port 'autocannon -c 10 -d 30 localhost:$PORT/health' --dest .profiles/heap -- node src/unified-server.js",
+    "profile:bubbleprof": "clinic bubbleprof --on-port 'autocannon -c 10 -d 30 localhost:$PORT/health' --dest .profiles/bubble -- node src/unified-server.js",
+    "profile:baseline": "node --prof src/unified-server.js",
+    "profile:compare": "node scripts/compare-profiles.js",
+    "pgo:baseline": "node scripts/pgo-workflow.js baseline",
+    "pgo:baseline:mock": "MOCK_MODE=true node scripts/pgo-workflow.js baseline",
+    "pgo:optimize": "node scripts/pgo-workflow.js optimize",
+    "pgo:verify": "node scripts/pgo-workflow.js verify",
+    "pgo:verify:mock": "MOCK_MODE=true node scripts/pgo-workflow.js verify"
   },
   "dependencies": {
-    "@slack/web-api": "^7.0.4",
     "@slack/bolt": "^3.17.1",
+    "@slack/web-api": "^7.0.4",
     "axios": "^1.7.2",
     "dotenv": "^16.4.5"
   },
@@ -38,5 +49,10 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/usvsthem-notdev/monday-slack-automation.git"
+  },
+  "devDependencies": {
+    "0x": "^6.0.0",
+    "autocannon": "^8.0.0",
+    "clinic": "^13.0.0"
   }
 }

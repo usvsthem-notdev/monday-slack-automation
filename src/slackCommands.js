@@ -280,8 +280,9 @@ function initializeSlackCommands(slackApp) {
   // ============================================================================
   
   slackApp.command('/create-task', async ({ command, ack, respond, client }) => {
-    // STEP 1: Acknowledge immediately (must happen within 3 seconds)
-    await ack();
+    // STEP 1: Acknowledge IMMEDIATELY with fire-and-forget pattern
+    // CRITICAL FIX: Don't await - ensures sub-millisecond acknowledgment
+    ack().catch(err => logger.error('ACK failed for /create-task', err));
     
     try {
       logger.info('Create task command received', { 
@@ -454,7 +455,8 @@ function initializeSlackCommands(slackApp) {
   // ============================================================================
   
   slackApp.action('create_task_submit', async ({ ack, body, client }) => {
-    await ack();
+    // Fire-and-forget acknowledgment for button action
+    ack().catch(err => logger.error('ACK failed for create_task_submit', err));
     
     try {
       // Extract values from the message blocks
@@ -577,7 +579,8 @@ function initializeSlackCommands(slackApp) {
   // ============================================================================
   
   slackApp.action('create_task_cancel', async ({ ack, body, client }) => {
-    await ack();
+    // Fire-and-forget acknowledgment for cancel button
+    ack().catch(err => logger.error('ACK failed for create_task_cancel', err));
     
     try {
       await client.chat.update({
@@ -605,8 +608,8 @@ function initializeSlackCommands(slackApp) {
   
   // FIXED: Quick create command - Proper async acknowledgment
   slackApp.command('/quick-task', async ({ command, ack, respond }) => {
-    // CRITICAL FIX: Acknowledge IMMEDIATELY
-    await ack();
+    // CRITICAL FIX: Fire-and-forget acknowledgment
+    ack().catch(err => logger.error('ACK failed for /quick-task', err));
     
     try {
       const text = command.text.trim();
@@ -688,7 +691,8 @@ function initializeSlackCommands(slackApp) {
   
   // Help command
   slackApp.command('/monday-help', async ({ command, ack, respond }) => {
-    await ack();
+    // Fire-and-forget acknowledgment
+    ack().catch(err => logger.error('ACK failed for /monday-help', err));
     
     await respond({
       text: '📋 *Monday.com Slack Commands*',

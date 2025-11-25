@@ -343,7 +343,8 @@ async function getMondayUserBySlackUser(slackUserId, slackClient) {
 // Register /tasks command
 function registerTasksCommand(slackApp) {
   slackApp.command('/tasks', async ({ command, ack, respond, client }) => {
-    await ack();
+    // CRITICAL FIX: Fire-and-forget acknowledgment for sub-millisecond response
+    ack().catch(err => logger.error('ACK failed for /tasks', err));
     
     try {
       logger.info('Tasks command received', { userId: command.user_id });

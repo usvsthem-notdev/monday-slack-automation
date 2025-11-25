@@ -43,3 +43,12 @@ temp/
 # Debug
 .pnp.*
 .yarn/
+
+# Profiling
+.profiles/
+isolate-*.log
+*.cpuprofile
+*.heapprofile
+
+# MCP configuration (may contain API keys)
+.mcp.json
