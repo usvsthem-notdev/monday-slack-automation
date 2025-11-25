@@ -912,9 +912,12 @@ initializeSlackCommands(app);
 registerTasksCommand(app);
 
 // Add /task-complete command
-app.command('/task-complete', async ({ command, ack, client }) => {
-  // Fire-and-forget acknowledgment
-  ack().catch(err => logger.error('ACK failed for /task-complete', err));
+app.command('/task-complete', ({ command, ack, client }) => {
+  // CRITICAL: Synchronous function for INSTANT acknowledgment
+  const ackPromise = ack();
+
+  // Queue async work
+  process.nextTick(async () => {
   
   const taskName = command.text.trim();
   
@@ -930,11 +933,14 @@ app.command('/task-complete', async ({ command, ack, client }) => {
   metrics.commandsProcessed++;
   logger.info('Task complete command received', { userId: command.user_id, taskName });
   
-  await client.chat.postEphemeral({
-    channel: command.channel_id,
-    user: command.user_id,
-    text: `✅ Marking "${taskName}" as complete...`
+    await client.chat.postEphemeral({
+      channel: command.channel_id,
+      user: command.user_id,
+      text: `✅ Marking "${taskName}" as complete...`
+    });
   });
+
+  return ackPromise;
 });
 
 console.log('✅ All Slack commands initialized');

@@ -279,30 +279,32 @@ function initializeSlackCommands(slackApp) {
   // 4. Replacing with final form
   // ============================================================================
   
-  slackApp.command('/create-task', async ({ command, ack, respond, client }) => {
-    // STEP 1: Acknowledge IMMEDIATELY with fire-and-forget pattern
-    // CRITICAL FIX: Don't await - ensures sub-millisecond acknowledgment
-    ack().catch(err => logger.error('ACK failed for /create-task', err));
-    
-    try {
-      logger.info('Create task command received', { 
-        userId: command.user_id,
-        text: command.text 
-      });
-      
-      // STEP 2: Show loading message via respond()
-      // This buys us time to fetch data without worrying about timeouts
-      await respond({
-        text: '⏳ Loading task creation form...',
-        response_type: 'ephemeral'
-      });
-      
-      // STEP 3: Fetch data (can take time, no rush!)
-      const start = Date.now();
-      const [boards, users] = await Promise.all([
-        getCachedBoards(),
-        getCachedUsers()
-      ]);
+  slackApp.command('/create-task', ({ command, ack, respond, client }) => {
+    // CRITICAL: Synchronous function for INSTANT acknowledgment
+    // Remove 'async' keyword to eliminate async overhead
+    const ackPromise = ack();
+
+    // Queue all async work - don't block the ack
+    process.nextTick(async () => {
+      try {
+        logger.info('Create task command received', {
+          userId: command.user_id,
+          text: command.text
+        });
+
+        // STEP 2: Show loading message via respond()
+        // This buys us time to fetch data without worrying about timeouts
+        await respond({
+          text: '⏳ Loading task creation form...',
+          response_type: 'ephemeral'
+        });
+
+        // STEP 3: Fetch data (can take time, no rush!)
+        const start = Date.now();
+        const [boards, users] = await Promise.all([
+          getCachedBoards(),
+          getCachedUsers()
+        ]);
       
       const fetchDuration = Date.now() - start;
       logger.info('Data fetched for form', { 
@@ -434,20 +436,27 @@ function initializeSlackCommands(slackApp) {
         response_type: 'ephemeral'
       });
       
-      const totalDuration = Date.now() - start;
-      logger.info('Form displayed successfully', { 
-        totalDuration: totalDuration + 'ms'
-      });
-      
-    } catch (error) {
-      logger.error('Error displaying create task form', error);
-      
-      await respond({
-        text: '❌ Sorry, there was an error loading the task creation form. Please try again.',
-        replace_original: true,
-        response_type: 'ephemeral'
-      });
-    }
+        const totalDuration = Date.now() - start;
+        logger.info('Form displayed successfully', {
+          totalDuration: totalDuration + 'ms'
+        });
+
+      } catch (error) {
+        logger.error('Error displaying create task form', error);
+
+        try {
+          await respond({
+            text: '❌ Sorry, there was an error loading the task creation form. Please try again.',
+            replace_original: true,
+            response_type: 'ephemeral'
+          });
+        } catch (respondError) {
+          logger.error('Failed to send error message to user', respondError);
+        }
+      }
+    });
+
+    return ackPromise;
   });
   
   // ============================================================================
@@ -607,9 +616,12 @@ function initializeSlackCommands(slackApp) {
   // ============================================================================
   
   // FIXED: Quick create command - Proper async acknowledgment
-  slackApp.command('/quick-task', async ({ command, ack, respond }) => {
-    // CRITICAL FIX: Fire-and-forget acknowledgment
-    ack().catch(err => logger.error('ACK failed for /quick-task', err));
+  slackApp.command('/quick-task', ({ command, ack, respond }) => {
+    // CRITICAL: Synchronous function for INSTANT acknowledgment
+    const ackPromise = ack();
+
+    // Queue async work
+    process.nextTick(async () => {
     
     try {
       const text = command.text.trim();
@@ -680,19 +692,25 @@ function initializeSlackCommands(slackApp) {
         response_type: 'ephemeral'
       });
       
-    } catch (error) {
-      logger.error('Error in quick task command', error);
-      await respond({
-        text: '❌ Sorry, there was an error creating the task. Please try again.',
-        response_type: 'ephemeral'
-      });
-    }
+      } catch (error) {
+        logger.error('Error in quick task command', error);
+        await respond({
+          text: '❌ Sorry, there was an error creating the task. Please try again.',
+          response_type: 'ephemeral'
+        });
+      }
+    });
+
+    return ackPromise;
   });
   
   // Help command
-  slackApp.command('/monday-help', async ({ command, ack, respond }) => {
-    // Fire-and-forget acknowledgment
-    ack().catch(err => logger.error('ACK failed for /monday-help', err));
+  slackApp.command('/monday-help', ({ command, ack, respond }) => {
+    // CRITICAL: Synchronous function for INSTANT acknowledgment
+    const ackPromise = ack();
+
+    // Queue async work
+    process.nextTick(async () => {
     
     await respond({
       text: '📋 *Monday.com Slack Commands*',
@@ -745,6 +763,9 @@ function initializeSlackCommands(slackApp) {
       ],
       response_type: 'ephemeral'
     });
+    });
+
+    return ackPromise;
   });
   
   logger.info('✅ Slack commands initialized with respond() pattern for /create-task');

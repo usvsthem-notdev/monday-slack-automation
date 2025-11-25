@@ -342,9 +342,12 @@ async function getMondayUserBySlackUser(slackUserId, slackClient) {
 
 // Register /tasks command
 function registerTasksCommand(slackApp) {
-  slackApp.command('/tasks', async ({ command, ack, respond, client }) => {
-    // CRITICAL FIX: Fire-and-forget acknowledgment for sub-millisecond response
-    ack().catch(err => logger.error('ACK failed for /tasks', err));
+  slackApp.command('/tasks', ({ command, ack, respond, client }) => {
+    // CRITICAL: Synchronous function for INSTANT acknowledgment
+    const ackPromise = ack();
+
+    // Queue async work
+    process.nextTick(async () => {
     
     try {
       logger.info('Tasks command received', { userId: command.user_id });
@@ -392,16 +395,19 @@ function registerTasksCommand(slackApp) {
         response_type: 'ephemeral'
       });
       
-    } catch (error) {
-      logger.error('Error in /tasks command', error);
-      await respond({
-        text: '❌ Sorry, there was an error fetching your tasks. Please try again.',
-        response_type: 'ephemeral',
-        replace_original: true
-      });
-    }
+      } catch (error) {
+        logger.error('Error in /tasks command', error);
+        await respond({
+          text: '❌ Sorry, there was an error fetching your tasks. Please try again.',
+          response_type: 'ephemeral',
+          replace_original: true
+        });
+      }
+    });
+
+    return ackPromise;
   });
-  
+
   logger.info('/tasks command registered');
 }
 
