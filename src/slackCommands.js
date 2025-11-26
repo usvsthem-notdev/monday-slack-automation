@@ -284,8 +284,8 @@ function initializeSlackCommands(slackApp) {
     // Remove 'async' keyword to eliminate async overhead
     const ackPromise = ack();
 
-    // Queue all async work - don't block the ack
-    process.nextTick(async () => {
+    // Queue all async work - use setImmediate to ensure ack completes first
+    setImmediate(async () => {
       try {
         logger.info('Create task command received', {
           userId: command.user_id,
@@ -620,8 +620,8 @@ function initializeSlackCommands(slackApp) {
     // CRITICAL: Synchronous function for INSTANT acknowledgment
     const ackPromise = ack();
 
-    // Queue async work
-    process.nextTick(async () => {
+    // Queue async work - use setImmediate to ensure ack completes first
+    setImmediate(async () => {
     
     try {
       const text = command.text.trim();
@@ -709,8 +709,8 @@ function initializeSlackCommands(slackApp) {
     // CRITICAL: Synchronous function for INSTANT acknowledgment
     const ackPromise = ack();
 
-    // Queue async work
-    process.nextTick(async () => {
+    // Queue async work - use setImmediate to ensure ack completes first
+    setImmediate(async () => {
     
     await respond({
       text: '📋 *Monday.com Slack Commands*',

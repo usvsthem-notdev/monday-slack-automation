@@ -346,8 +346,8 @@ function registerTasksCommand(slackApp) {
     // CRITICAL: Synchronous function for INSTANT acknowledgment
     const ackPromise = ack();
 
-    // Queue async work
-    process.nextTick(async () => {
+    // Queue async work - use setImmediate to ensure ack completes first
+    setImmediate(async () => {
     
     try {
       logger.info('Tasks command received', { userId: command.user_id });
