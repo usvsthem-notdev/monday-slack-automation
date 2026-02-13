@@ -1,32 +1,81 @@
 /**
- * AsyncQueue - In-Memory Background Job Queue
- * 
+ * AsyncQueue - In-Memory Background Job Queue with Dead Letter Queue
+ *
  * Provides async request handling for Slack interactions.
  * Responds immediately to Slack, then processes jobs in background.
- * 
+ *
  * Features:
  * - Instant Slack acknowledgment (< 100ms)
  * - Background job processing
  * - Error handling and retry logic
+ * - Dead Letter Queue (DLQ) with file persistence
  * - Job status tracking
  * - Graceful shutdown
- * 
+ *
  * @module asyncQueue
  */
+
+const fs = require('fs');
+const path = require('path');
+const axios = require('axios');
+
+const DLQ_FILE = path.join(__dirname, '../data/dlq.json');
+const DLQ_TMP  = DLQ_FILE + '.tmp';
 
 class AsyncQueue {
   constructor() {
     this.queue = [];
     this.processing = false;
+    this.deadLetterQueue = [];
     this.stats = {
       totalJobs: 0,
       completedJobs: 0,
       failedJobs: 0,
       currentQueueSize: 0
     };
-    
+
+    // Load persisted DLQ from disk
+    this._loadDLQ();
+
     // Graceful shutdown handler
     this.setupShutdownHandler();
+  }
+
+  /** Load DLQ from disk on startup */
+  _loadDLQ() {
+    try {
+      if (fs.existsSync(DLQ_FILE)) {
+        const raw = fs.readFileSync(DLQ_FILE, 'utf8');
+        this.deadLetterQueue = JSON.parse(raw);
+        console.log(`[AsyncQueue] Loaded ${this.deadLetterQueue.length} DLQ entries from disk`);
+      }
+    } catch (err) {
+      console.error('[AsyncQueue] Failed to load DLQ from disk:', err.message);
+      this.deadLetterQueue = [];
+    }
+  }
+
+  /** Persist DLQ to disk atomically */
+  _saveDLQ() {
+    try {
+      const dir = path.dirname(DLQ_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(DLQ_TMP, JSON.stringify(this.deadLetterQueue, null, 2));
+      fs.renameSync(DLQ_TMP, DLQ_FILE);
+    } catch (err) {
+      console.error('[AsyncQueue] Failed to persist DLQ:', err.message);
+    }
+  }
+
+  /** Categorize error for DLQ metadata */
+  _categorizeError(errorMessage) {
+    if (!errorMessage) return 'UNKNOWN';
+    const msg = String(errorMessage).toUpperCase();
+    if (msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT') || msg.includes('ENOTFOUND') || msg.includes('NETWORK')) return 'NETWORK';
+    if (msg.includes('401') || msg.includes('403') || msg.includes('AUTH')) return 'AUTH';
+    if (msg.includes('429') || msg.includes('RATE')) return 'RATE_LIMIT';
+    if (msg.includes('500') || msg.includes('502') || msg.includes('503') || msg.includes('SERVER')) return 'SERVER';
+    return 'UNKNOWN';
   }
 
   /**
@@ -204,26 +253,53 @@ class AsyncQueue {
   }
 
   /**
-   * Handle permanently failed jobs
-   * Override this method to customize failure handling
-   * 
-   * @private
+   * Handle permanently failed jobs — Dead Letter Queue implementation
+   *
    * @param {Object} job - The failed job
    */
   handleFailedJob(job) {
-    // In production, you might want to:
-    // - Send to a dead letter queue
-    // - Log to external monitoring service
-    // - Send alert notification
-    // - Store in database for later analysis
-    
-    console.error('💀 [AsyncQueue] Failed job details:', {
+    const entry = {
       id: job.id,
       type: job.type,
       error: job.error,
+      errorCategory: this._categorizeError(job.error),
       retries: job.retries,
-      data: job.data
-    });
+      data: job.data,
+      failedAt: new Date().toISOString()
+    };
+
+    this.deadLetterQueue.push(entry);
+    this._saveDLQ();
+
+    console.error('[AsyncQueue] Job moved to DLQ:', entry);
+
+    // Optional alert webhook
+    const alertUrl = process.env.ALERT_WEBHOOK_URL;
+    if (alertUrl) {
+      axios.post(alertUrl, {
+        text: `[AsyncQueue] Job permanently failed: ${job.type} (${job.id}) — ${job.error}`
+      }).catch(err => console.error('[AsyncQueue] Alert webhook failed:', err.message));
+    }
+  }
+
+  /** Return all DLQ entries */
+  getDLQ() {
+    return [...this.deadLetterQueue];
+  }
+
+  /** Clear all DLQ entries */
+  clearDLQ() {
+    this.deadLetterQueue = [];
+    this._saveDLQ();
+  }
+
+  /** Retry a specific DLQ entry by id */
+  async retryDLQJob(id) {
+    const idx = this.deadLetterQueue.findIndex(e => e.id === id);
+    if (idx === -1) throw new Error(`DLQ entry not found: ${id}`);
+    const [entry] = this.deadLetterQueue.splice(idx, 1);
+    this._saveDLQ();
+    return entry;
   }
 
   /**

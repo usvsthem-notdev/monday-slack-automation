@@ -1,6 +1,11 @@
 // src/utils/performanceMonitor.js
 // Real-time performance monitoring and metrics
 
+const fs = require('fs');
+const path = require('path');
+
+const METRICS_FILE = path.join(__dirname, '../../data/metrics.json');
+
 class PerformanceMonitor {
   constructor() {
     this.metrics = {
@@ -222,9 +227,109 @@ class PerformanceMonitor {
       uptime: Date.now()
     };
   }
+
+  // Take a snapshot of current metrics (returns plain object)
+  takeSnapshot() {
+    return JSON.parse(JSON.stringify(this.getMetrics()));
+  }
+
+  // Export metrics to disk
+  exportMetrics() {
+    try {
+      const dir = path.dirname(METRICS_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const snapshot = this.takeSnapshot();
+      const tmp = METRICS_FILE + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(snapshot, null, 2));
+      fs.renameSync(tmp, METRICS_FILE);
+    } catch (err) {
+      console.error('[PerformanceMonitor] Failed to export metrics:', err.message);
+    }
+  }
+
+  // Load metrics from disk (on startup)
+  loadMetrics() {
+    try {
+      if (fs.existsSync(METRICS_FILE)) {
+        const raw = fs.readFileSync(METRICS_FILE, 'utf8');
+        return JSON.parse(raw);
+      }
+    } catch (err) {
+      console.error('[PerformanceMonitor] Failed to load metrics:', err.message);
+    }
+    return null;
+  }
+
+  // Export in Prometheus text format
+  toPrometheusFormat() {
+    const m = this.getMetrics();
+    const lines = [
+      `# HELP requests_total Total number of requests`,
+      `# TYPE requests_total counter`,
+      `requests_total ${m.requests.total}`,
+      `# HELP requests_successful_total Successful requests`,
+      `# TYPE requests_successful_total counter`,
+      `requests_successful_total ${m.requests.successful}`,
+      `# HELP requests_failed_total Failed requests`,
+      `# TYPE requests_failed_total counter`,
+      `requests_failed_total ${m.requests.failed}`,
+      `# HELP monday_fetch_avg_ms Average Monday.com fetch time`,
+      `# TYPE monday_fetch_avg_ms gauge`,
+      `monday_fetch_avg_ms ${m.performance.mondayFetch.avg}`,
+      `# HELP monday_fetch_p95_ms 95th percentile Monday.com fetch time`,
+      `# TYPE monday_fetch_p95_ms gauge`,
+      `monday_fetch_p95_ms ${m.performance.mondayFetch.p95}`,
+      `# HELP slack_post_avg_ms Average Slack post time`,
+      `# TYPE slack_post_avg_ms gauge`,
+      `slack_post_avg_ms ${m.performance.slackPost.avg}`,
+      `# HELP uptime_hours Service uptime in hours`,
+      `# TYPE uptime_hours gauge`,
+      `uptime_hours ${this.getUptime()}`
+    ];
+    return lines.join('\n') + '\n';
+  }
+
+  // Compute linear trend for a named metric over last `window` samples
+  getTrends(metricName, window = 10) {
+    const data = (this.metrics.timing[metricName] || []).slice(-window);
+    if (data.length < 2) return { slope: 0, trend: 'stable' };
+
+    const n = data.length;
+    const xMean = (n - 1) / 2;
+    const yMean = data.reduce((a, b) => a + b, 0) / n;
+    let num = 0, den = 0;
+    data.forEach((y, x) => {
+      num += (x - xMean) * (y - yMean);
+      den += (x - xMean) ** 2;
+    });
+    const slope = den === 0 ? 0 : num / den;
+    const trend = slope > 5 ? 'increasing' : slope < -5 ? 'decreasing' : 'stable';
+    return { slope: Math.round(slope * 100) / 100, trend };
+  }
+
+  // Start periodic export (production only)
+  startPeriodicExport(intervalMs = 60000) {
+    if (this._exportInterval) return;
+    this._exportInterval = setInterval(() => this.exportMetrics(), intervalMs);
+  }
+
+  // Stop periodic export
+  stopPeriodicExport() {
+    if (this._exportInterval) {
+      clearInterval(this._exportInterval);
+      this._exportInterval = null;
+    }
+  }
 }
 
 // Singleton instance
 const monitor = new PerformanceMonitor();
 
+// Export class for testing
 module.exports = monitor;
+module.exports.PerformanceMonitor = PerformanceMonitor;
+
+// Auto-start periodic export in production
+if (process.env.NODE_ENV === 'production') {
+  monitor.startPeriodicExport();
+}

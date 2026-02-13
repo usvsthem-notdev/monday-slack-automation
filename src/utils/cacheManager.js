@@ -221,6 +221,7 @@ const cache = new CacheManager();
 // Export helper functions
 module.exports = {
   cache,
+  CacheManager,
   
   // Helper: Cache Monday.com board data
   cacheBoardData: async (boardId, fetchFunction) => {
