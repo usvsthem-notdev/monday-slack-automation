@@ -1,0 +1,4 @@
+{
+  "workspaceIds": [12742680, 12691809, 12666498],
+  "description": "Monday.com workspace IDs to query for tasks. Add/remove IDs here to control which workspaces are scanned."
+}

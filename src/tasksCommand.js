@@ -1,4 +1,6 @@
 const axios = require('axios');
+const path = require('path');
+const workspacesConfig = require(path.join(__dirname, '../config/workspaces.json'));
 
 // Configuration
 const MONDAY_API_KEY = process.env.MONDAY_API_KEY;
@@ -48,7 +50,7 @@ async function mondayQuery(query) {
 
 // Get all boards from all workspaces
 async function getAllBoards() {
-  const workspaceIds = [12742680, 12691809, 12666498];
+  const workspaceIds = workspacesConfig.workspaceIds;
   const allBoards = [];
   
   for (const workspaceId of workspaceIds) {
@@ -412,5 +414,9 @@ function registerTasksCommand(slackApp) {
 }
 
 module.exports = {
-  registerTasksCommand
+  registerTasksCommand,
+  organizeTasks,
+  formatTaskMessage,
+  getAllBoards,
+  getUserTasksFromBoard
 };

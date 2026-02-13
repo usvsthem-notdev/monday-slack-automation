@@ -403,5 +403,7 @@ async function processWebhookEvent(event) {
 module.exports = {
   handleWebhook,
   processWebhookEvent,
-  sendSlackNotification
+  sendSlackNotification,
+  extractNewlyAssignedUsers,
+  formatTaskNotification
 };
