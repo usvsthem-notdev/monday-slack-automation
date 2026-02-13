@@ -2,7 +2,17 @@
 
 ⚡️ **Production-ready Slack automation with async processing, real-time webhooks, and comprehensive task management**
 
-## 🌟 Version 6.0 - Unified Architecture
+## 🌟 Version 6.1 - Empirically Validated
+
+### ✨ What's New in v6.1
+
+- 🧪 **176-test suite** — 88% statement coverage, 80%+ on all metrics
+- 📬 **Dead Letter Queue** — failed jobs persist to `data/dlq.json` with error categorization
+- 📊 **Prometheus metrics** — `/metrics/prometheus` for scraping
+- 📝 **Structured logging** — JSON logger with child contexts and configurable log levels
+- ⚙️ **Workspace config** — workspace IDs extracted to `config/workspaces.json`
+- 🔁 **CI/CD** — GitHub Actions pipeline enforces 80% coverage on every push
+- 📚 **Full docs** — API reference, troubleshooting guide, and contributing guide
 
 ### ✨ What's New in v6.0
 
@@ -287,6 +297,41 @@ curl https://your-server.com/health
 
 ## 🧪 Testing
 
+### Automated Test Suite
+
+```bash
+# Run all 176 tests
+npm test
+
+# Run with coverage report (enforces 80% thresholds)
+npm run test:coverage
+
+# Watch mode during development
+npm run test:watch
+```
+
+Coverage thresholds (enforced in CI):
+- **Statements**: ≥ 80% (current: 88.65%)
+- **Branches**: ≥ 80% (current: 80.25%)
+- **Functions**: ≥ 80% (current: 89.78%)
+- **Lines**: ≥ 80% (current: 90.19%)
+
+Test structure:
+```
+src/__tests__/
+├── mocks/              # Slack + Monday.com mock helpers
+├── properties/         # Property-based tests (fast-check)
+├── e2e/                # End-to-end integration tests (nock)
+├── asyncQueue.test.js
+├── cacheManager.test.js
+├── errorHandler.test.js
+├── logger.test.js
+├── messageFormatter.test.js
+├── performanceMonitor.test.js
+├── tasksCommand.test.js
+└── webhookHandler.test.js
+```
+
 ### Manual Testing
 
 **Test Slack Commands**:
@@ -324,9 +369,9 @@ curl -X POST https://your-server.com/trigger
 
 ### Customization
 
-**Modify workspaces** (in `src/unified-server.js`):
-```javascript
-const workspaceIds = [12742680, 12691809, 12666498];
+**Modify workspaces** (in `config/workspaces.json`):
+```json
+{ "workspaceIds": [12742680, 12691809, 12666498] }
 ```
 
 **Customize notification format** (in `src/webhookHandler.js`):
@@ -416,25 +461,37 @@ See [UNIFIED_MIGRATION_GUIDE.md](UNIFIED_MIGRATION_GUIDE.md) for detailed migrat
 ```
 monday-slack-automation/
 ├── src/
-│   ├── unified-server.js      # Main server (ACTIVE - v6.0)
-│   ├── slackCommands.js       # Command definitions
-│   ├── tasksCommand.js        # Tasks command logic
-│   ├── webhookHandler.js      # Webhook processing
-│   ├── messageFormatter.js    # Message formatting
-│   ├── server.js              # Legacy Slack commands (deprecated)
-│   └── automation.js          # Legacy daily tasks (deprecated)
-├── legacy/                     # Archived old code
-├── docs/                       # Documentation
-├── tests/                      # Test files
-├── package.json               # Points to unified-server.js
-├── UNIFIED_MIGRATION_GUIDE.md # v6.0 migration guide
-└── README.md                  # This file
+│   ├── unified-server.js       # Main server (v6.0)
+│   ├── slackCommands.js        # Command definitions
+│   ├── tasksCommand.js         # /tasks command logic
+│   ├── webhookHandler.js       # Monday.com webhook processing
+│   ├── messageFormatter.js     # Block Kit message formatting
+│   ├── asyncQueue.js           # Background job queue + DLQ
+│   ├── utils/
+│   │   ├── cacheManager.js     # TTL cache
+│   │   ├── errorHandler.js     # Circuit breaker + retry logic
+│   │   ├── logger.js           # Structured JSON logger
+│   │   └── performanceMonitor.js # Metrics + Prometheus export
+│   └── __tests__/              # 176-test suite
+├── config/
+│   └── workspaces.json         # Monday.com workspace IDs
+├── data/                       # Runtime data (gitignored)
+│   ├── dlq.json                # Dead letter queue persistence
+│   └── metrics.json            # Performance metrics snapshot
+├── docs/
+│   ├── API_REFERENCE.md
+│   ├── TROUBLESHOOTING.md
+│   └── CONTRIBUTING.md
+├── .github/workflows/ci.yml    # GitHub Actions CI
+├── jest.config.js              # Test configuration (80% thresholds)
+├── package.json
+└── README.md
 ```
 
 ## 🚀 Available Scripts
 
 ```bash
-# Start unified server (recommended)
+# Start unified server
 npm start
 
 # Development mode with auto-reload
@@ -443,11 +500,11 @@ npm run dev
 # Run tests
 npm test
 
-# Run legacy Slack commands server (deprecated)
-npm run legacy-server
+# Run with coverage
+npm run test:coverage
 
-# Run legacy daily automation (deprecated)
-npm run legacy-automation
+# Watch mode
+npm run test:watch
 ```
 
 ## 🤝 Contributing
@@ -480,6 +537,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-**Version**: 6.0.0-unified  
-**Last Updated**: October 22, 2025  
-**Status**: ✅ Production Ready - Unified Architecture with Async Processing
+**Version**: 6.1.0
+**Last Updated**: February 2026
+**Status**: ✅ Production Ready — 176 tests passing, 88%+ coverage
