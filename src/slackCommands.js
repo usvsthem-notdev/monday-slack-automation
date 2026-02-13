@@ -463,152 +463,154 @@ function initializeSlackCommands(slackApp) {
   // Handle Create Task Button Click
   // ============================================================================
   
-  slackApp.action('create_task_submit', async ({ ack, body, client }) => {
-    // Fire-and-forget acknowledgment for button action
-    ack().catch(err => logger.error('ACK failed for create_task_submit', err));
-    
-    try {
-      // Extract values from the message blocks
-      const values = {};
-      body.message.blocks.forEach(block => {
-        if (block.type === 'input') {
-          const element = block.element;
-          if (element.type === 'plain_text_input') {
-            values[block.block_id] = element.value || null;
-          } else if (element.type === 'static_select') {
-            values[block.block_id] = element.selected_option?.value || null;
-          } else if (element.type === 'multi_static_select') {
-            values[block.block_id] = element.selected_options?.map(opt => opt.value) || [];
-          } else if (element.type === 'datepicker') {
-            values[block.block_id] = element.selected_date || null;
+  slackApp.action('create_task_submit', ({ ack, body, client }) => {
+    const ackPromise = ack();
+
+    setImmediate(async () => {
+      try {
+        // Extract values from the message blocks
+        const values = {};
+        body.message.blocks.forEach(block => {
+          if (block.type === 'input') {
+            const element = block.element;
+            if (element.type === 'plain_text_input') {
+              values[block.block_id] = element.value || null;
+            } else if (element.type === 'static_select') {
+              values[block.block_id] = element.selected_option?.value || null;
+            } else if (element.type === 'multi_static_select') {
+              values[block.block_id] = element.selected_options?.map(opt => opt.value) || [];
+            } else if (element.type === 'datepicker') {
+              values[block.block_id] = element.selected_date || null;
+            }
           }
-        }
-      });
-      
-      const taskName = values.task_name;
-      const boardId = values.board_select;
-      const assignees = values.assignees || [];
-      const dueDate = values.due_date;
-      
-      // Validate required fields
-      if (!taskName || !boardId) {
-        await client.chat.postEphemeral({
-          channel: body.channel.id,
-          user: body.user.id,
-          text: '❌ Please fill in the Task Name and Board fields.'
         });
-        return;
-      }
-      
-      logger.info('Creating task from form', {
-        taskName,
-        boardId,
-        assignees,
-        dueDate,
-        userId: body.user.id
-      });
-      
-      // Update message to show progress
-      await client.chat.update({
-        channel: body.channel.id,
-        ts: body.message.ts,
-        text: '⏳ Creating task on Monday.com...',
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: '⏳ *Creating task...*\n\nPlease wait while we create your task on Monday.com.'
-            }
-          }
-        ]
-      });
-      
-      // Create the task on Monday.com
-      const createdTask = await createMondayTask(boardId, taskName, assignees, dueDate, null);
-      
-      // Update message with success
-      await client.chat.update({
-        channel: body.channel.id,
-        ts: body.message.ts,
-        text: '✅ Task created successfully!',
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: `✅ *Task Created Successfully!*\n\n*Task:* ${createdTask.name}\n*Board:* ${createdTask.board.name}\n*Assigned to:* ${assignees.length} ${assignees.length === 1 ? 'person' : 'people'}${dueDate ? `\n*Due Date:* ${dueDate}` : ''}`
-            }
-          },
-          {
-            type: 'actions',
-            elements: [
-              {
-                type: 'button',
-                text: {
-                  type: 'plain_text',
-                  text: '📱 View on Monday.com'
-                },
-                url: `https://drexcorp-company.monday.com/boards/${createdTask.board.id}/pulses/${createdTask.id}`,
-                style: 'primary'
+
+        const taskName = values.task_name;
+        const boardId = values.board_select;
+        const assignees = values.assignees || [];
+        const dueDate = values.due_date;
+
+        if (!taskName || !boardId) {
+          await client.chat.postEphemeral({
+            channel: body.channel.id,
+            user: body.user.id,
+            text: '❌ Please fill in the Task Name and Board fields.'
+          });
+          return;
+        }
+
+        logger.info('Creating task from form', {
+          taskName,
+          boardId,
+          assignees,
+          dueDate,
+          userId: body.user.id
+        });
+
+        await client.chat.update({
+          channel: body.channel.id,
+          ts: body.message.ts,
+          text: '⏳ Creating task on Monday.com...',
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: '⏳ *Creating task...*\n\nPlease wait while we create your task on Monday.com.'
               }
-            ]
-          }
-        ]
-      });
-      
-      logger.info('Task created successfully', {
-        taskId: createdTask.id,
-        taskName: createdTask.name,
-        boardId: createdTask.board.id
-      });
-      
-    } catch (error) {
-      logger.error('Error creating task from button', error);
-      
-      await client.chat.update({
-        channel: body.channel.id,
-        ts: body.message.ts,
-        text: '❌ Error creating task',
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: '❌ *Error creating task*\n\nSorry, there was an error creating the task. Please try again.'
             }
-          }
-        ]
-      });
-    }
+          ]
+        });
+
+        const createdTask = await createMondayTask(boardId, taskName, assignees, dueDate, null);
+
+        await client.chat.update({
+          channel: body.channel.id,
+          ts: body.message.ts,
+          text: '✅ Task created successfully!',
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `✅ *Task Created Successfully!*\n\n*Task:* ${createdTask.name}\n*Board:* ${createdTask.board.name}\n*Assigned to:* ${assignees.length} ${assignees.length === 1 ? 'person' : 'people'}${dueDate ? `\n*Due Date:* ${dueDate}` : ''}`
+              }
+            },
+            {
+              type: 'actions',
+              elements: [
+                {
+                  type: 'button',
+                  text: {
+                    type: 'plain_text',
+                    text: '📱 View on Monday.com'
+                  },
+                  url: `https://drexcorp-company.monday.com/boards/${createdTask.board.id}/pulses/${createdTask.id}`,
+                  style: 'primary'
+                }
+              ]
+            }
+          ]
+        });
+
+        logger.info('Task created successfully', {
+          taskId: createdTask.id,
+          taskName: createdTask.name,
+          boardId: createdTask.board.id
+        });
+
+      } catch (error) {
+        logger.error('Error creating task from button', error);
+
+        await client.chat.update({
+          channel: body.channel.id,
+          ts: body.message.ts,
+          text: '❌ Error creating task',
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: '❌ *Error creating task*\n\nSorry, there was an error creating the task. Please try again.'
+              }
+            }
+          ]
+        });
+      }
+    });
+
+    return ackPromise;
   });
   
   // ============================================================================
   // Handle Cancel Button Click
   // ============================================================================
   
-  slackApp.action('create_task_cancel', async ({ ack, body, client }) => {
-    // Fire-and-forget acknowledgment for cancel button
-    ack().catch(err => logger.error('ACK failed for create_task_cancel', err));
-    
-    try {
-      await client.chat.update({
-        channel: body.channel.id,
-        ts: body.message.ts,
-        text: 'Cancelled',
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: '❌ Task creation cancelled.'
+  slackApp.action('create_task_cancel', ({ ack, body, client }) => {
+    const ackPromise = ack();
+
+    setImmediate(async () => {
+      try {
+        await client.chat.update({
+          channel: body.channel.id,
+          ts: body.message.ts,
+          text: 'Cancelled',
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: '❌ Task creation cancelled.'
+              }
             }
-          }
-        ]
-      });
-    } catch (error) {
-      logger.error('Error handling cancel button', error);
-    }
+          ]
+        });
+      } catch (error) {
+        logger.error('Error handling cancel button', error);
+      }
+    });
+
+    return ackPromise;
   });
   
   // ============================================================================
